@@ -43,6 +43,5 @@ def AutoTest():
     myapi.instrs_close(*Instrs)
 
 if __name__ == "__main__":
-    # xw.Book("TestInput.xlsm").set_mock_caller()
     AutoTest()
-    exit()
+    exit()  

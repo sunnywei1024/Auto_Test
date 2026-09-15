@@ -10,5 +10,5 @@ from xlutils.copy import copy
 
 
 def I2C_Test(myapi, book,temp, **Parameters):
-    print("I2C_Test START\n")
+    print('I2C_TEST Start')
     pass

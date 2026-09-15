@@ -10,6 +10,7 @@ from Layer1.GK_I2C import GK_I2C
 from ctypes import *
 
 def UR_Test(myapi, temp, item_dir,**Parameters):
+
     myapi.MCU.open()
     nRet = myapi.VII_ScanDevice(1)
     if(nRet <= 0):

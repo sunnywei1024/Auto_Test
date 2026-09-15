@@ -2868,7 +2868,7 @@ if __name__ == "__main__":
 
             # mxo.channel_bandwidth(1, 20e6)
             # mxo.channel_bandwidth(2, 20e6)
-
+            
             mxo.channel_range(1, 10.0)
             mxo.channel_range(2, 10.0)
     

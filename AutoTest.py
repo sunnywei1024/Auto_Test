@@ -6,6 +6,7 @@ Chicago
 import time
 import os
 import xlwt
+import sys
 import pymodbus
 from Layer2.TestInput import TestInput
 from Layer2.api import *
@@ -14,14 +15,18 @@ import Layer3.FF
 import Layer3.SS
 import Layer3.FS
 import Layer3.BASE
-
+# Ensure the project root (the folder containing Layer1/Layer2/Layer3) is on
+# sys.path, so these packages can be imported regardless of the current directory.
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 # -------------------------------------------------------------------------------------------------#
 def AutoTest():
     print(os.path.dirname(__file__))
     Instrs = TestInput(os.path.dirname(__file__) + "\\TestInput.xlsx").get_instr()    # Get instrument information
     TestItems = TestInput(os.path.dirname(__file__) + "\\TestInput.xlsx").get_data()  # Get test items
     TestIC = TestInput(os.path.dirname(__file__) + "\\TestInput.xlsx").get_IC()       # Get IC information
-    print(TestIC)
+    # print(TestIC)
     isTem = TestInput(os.path.dirname(__file__) + "\\TestInput.xlsx").get_isTemp()    # Get temperature is needed 
     temp_list = TestInput(os.path.dirname(__file__) + "\\TestInput.xlsx").get_Temp()  # Get temperature information
     if isTem:
@@ -33,7 +38,7 @@ def AutoTest():
     for temp in temp_list:
         for j in range(len(TestItems)):
             TestItems[j] = {**TestItems[j]}
-            print(TestItems[j]['测试函数'])
+            # print(TestItems[j]['测试函数'])
             item_name = str(TestItems[j]['测试函数']).strip()
             item_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),"Report",TestIC,item_name)
             if not os.path.exists(item_dir):

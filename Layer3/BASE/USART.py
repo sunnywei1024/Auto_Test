@@ -64,6 +64,6 @@ def UR_Test(myapi, temp, item_dir,**Parameters):
             Imax=Parameters[key] 
         elif key == 'Voutset':
             Voutset=Parameters[key] 
-    print("UR_Test START\n")
+    print("UR_Test START")
     pass
 

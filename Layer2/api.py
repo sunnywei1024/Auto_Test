@@ -41,6 +41,9 @@ class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
             elif i['设备类型']=='COM':
                 if i['设备型号'] =='SerialPort':
                     names[i['设备名称']] = SerialPort(port=i['设备地址'])  
+            elif i['设备类型']=='Multimeter':
+                if i['设备型号'] =='34461A':
+                    names[i['设备名称']] = SerialPort(port=i['设备地址'])  
   
 
     def instrs_close(self, *instrs):
@@ -55,8 +58,9 @@ class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
                     names[i['设备名称']].close()
                 elif i['设备型号'] =='Lecroy':
                     names[i['设备名称']].close()
-                elif i['设备型号'] =='Lecroy':
-                    pass
+            elif i['设备类型']=='Multimeter':
+                if i['设备型号'] =='34461A':
+                    names[i['设备名称']].close()
             
 if __name__ == "__main__":
     myapi = api()

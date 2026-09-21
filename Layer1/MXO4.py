@@ -2389,7 +2389,7 @@ class MXO4(RsInstrument):
             self.data_chunk_size = 100000  # 按 100k 字节分块传输 (默认)
             print('Now start to transfer binary waveform data. Please wait for about 20 seconds...')
             data = self.query_bin_or_ascii_float_list(f"CHANnel{ch}:DATA:VALues?")
-            print(f'Binary waveform transfer elapsed time: {time.time() - start:.3f}sec\n')
+            print(f'Binary waveform transfer elapsed time: {time.time() - start:.3f}sec')
             volts = data
 
         import numpy as np
@@ -2559,7 +2559,7 @@ class MXO4(RsInstrument):
         if add_timestamp:
             filename = self._stamp(filename)
         root, ext = os.path.splitext(filename)
-        screenshot_path = f"scope_{root}{ext}"
+        screenshot_path = f"{root}{ext}"
         if not filesave:
             return self.save_screenshot_direct(screenshot_path)
         else:
@@ -2567,7 +2567,7 @@ class MXO4(RsInstrument):
  
 #########################################################################################
 #########################################################################################
-#########################################################################################
+#########################################################################################  
     def download_file(self, instr_path, pc_path,localfile=None):
         """
         从示波器下载文件到 PC (``MMEMory:DATA?``)。
@@ -3067,7 +3067,7 @@ if __name__ == "__main__":
     finally:
         mxo.close()
 
-    # 记录代码运行结束时间, 并计算打印耗时
+    # 记录代码运行结束时间, 并计算打印耗时  
     end_time = time.time()
     print(f"程序结束时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"运行耗时: {end_time - start_time:.3f} 秒")

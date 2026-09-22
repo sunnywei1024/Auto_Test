@@ -1,5 +1,5 @@
 # -*- coding: UTF-8 -*-
-# 34461A 万用表
+# 34461A multimeter
 import pyvisa
 from pyvisa.constants import *
 import xlwt
@@ -8,7 +8,7 @@ import os
 
 
 class KEYSIGHT34461A:
-    # 打开万用表
+    # open the multimeter
     def __init__(self, addr,type):
         rm = pyvisa.ResourceManager()
         tupl = rm.list_resources()
@@ -38,9 +38,9 @@ class KEYSIGHT34461A:
 
     def DCV(self, volt_value=100, count=1, delay=100):
         """
-            @:param volt_value 100mv~1000V  测试电压值
-            @:param count 1~100  样本统计数量
-            @:param delay 延迟100ms
+            @:param volt_value 100mv~1000V  test voltage
+            @:param count 1~100  number of samples
+            @:param delay delay 100ms
         """
 
         if volt_value < 0 or delay < 0:
@@ -66,7 +66,7 @@ class KEYSIGHT34461A:
             self.V_avg_value = Sum / len(dcv_result)
             self.V_max_value = max(dcv_result)
             self.V_min_value = min(dcv_result)
-            print("直流电电压测试样本数量=%d 最大值=%s 最小值=%s 平均值=%f" % (count, self.V_max_value, self.V_min_value, self.V_avg_value))
+            print("DC voltage samples=%d max=%s min=%s avg=%f" % (count, self.V_max_value, self.V_min_value, self.V_avg_value))
             return self.V_avg_value
         except ValueError:
             print(ValueError)
@@ -78,10 +78,10 @@ class KEYSIGHT34461A:
     def DCI(self, dampere_range=10, dampere_res=0.0001,
             count=1, delay=100):
         """
-        :param ampere_max:10A   测试电流值
-        :param ampere_min:0.0001A 测试电流值
-        :param count: 1~100  样本统计数量
-        :param delay:延迟100ms
+        :param ampere_max:10A   test current
+        :param ampere_min:0.0001A test current
+        :param count: 1~100  number of samples
+        :param delay:delay 100ms
         :return:
         """
         if dampere_range < 0 or dampere_res < 0:
@@ -106,7 +106,7 @@ class KEYSIGHT34461A:
             self.I_avg_value = Sum / len(dci_result)
             self.I_max_value = max(dci_result)
             self.I_min_value = min(dci_result)
-            print("直流电电流测试样本数量=%d 最大值=%s 最小值=%s 平均值=%f" % (count, self.I_max_value, self.I_min_value, self.I_avg_value))
+            print("DC current samples=%d max=%s min=%s avg=%f" % (count, self.I_max_value, self.I_min_value, self.I_avg_value))
             return self.I_avg_value
         except ValueError:
             print(ValueError)
@@ -119,10 +119,10 @@ class KEYSIGHT34461A:
     def OHM(self, ohm_max=100, ohm_min=0.0001, count=100,
             delay=100):
         """
-            @:param ohm_max 电阻最大值 默认100欧姆
-            @:param ohm_min 电阻最小值,默认0.0001欧
-            @:param count 1~100  样本统计数量
-            @:param delay 延迟100ms
+            @:param ohm_max maximum resistance, 100 ohm by default
+            @:param ohm_min minimum resistance, 0.0001 ohm by default
+            @:param count 1~100  number of samples
+            @:param delay delay 100ms
         """
 
         if ohm_max < 0 or ohm_min < 0:
@@ -148,7 +148,7 @@ class KEYSIGHT34461A:
             self.O_avg_value = Sum / len(ohm_result)
             self.O_max_value = max(ohm_result)
             self.O_min_value = min(ohm_result)
-            print("电阻测试样本数量=%d 最大值=%s 最小值=%s 平均值=%f" % (count, self.O_max_value, self.O_min_value, self.O_avg_value))
+            print("Resistance samples=%d max=%s min=%s avg=%f" % (count, self.O_max_value, self.O_min_value, self.O_avg_value))
         except ValueError:
             print(ValueError)
         finally:
@@ -158,21 +158,21 @@ class KEYSIGHT34461A:
 
     def Temperature(self, count=10, delay=100):
         """
-            :param Temprange: 最大温度 5000
-            :param count:  1~100  样本统计数量
-            :param delay:  延迟100ms
+            :param Temprange: maximum temperature 5000
+            :param count:  1~100  number of samples
+            :param delay:  delay 100ms
             :return:
             """
         try:
-            time_string = str(time.strftime('%Y%m%d%H%M%S') + '温度测试')
+            time_string = str(time.strftime('%Y%m%d%H%M%S') + 'TemperatureTest')
             dev_string = './' + time_string + '.xls'
             path = os.path.abspath(dev_string)
             book = xlwt.Workbook(encoding='utf-8', style_compression=0)
-            sheet = book.add_sheet("温度测试日志表", cell_overwrite_ok=True)
-            sheet.write(0, 0, '温度测试值(A)')
-            sheet.write(1, 0, '最大温度值(A)')
-            sheet.write(2, 0, '最小温度值(A)')
-            sheet.write(3, 0, '平均温度值(A)')
+            sheet = book.add_sheet("TemperatureLog", cell_overwrite_ok=True)
+            sheet.write(0, 0, 'Temperature value(A)')
+            sheet.write(1, 0, 'Max temperature(A)')
+            sheet.write(2, 0, 'Min temperature(A)')
+            sheet.write(3, 0, 'Avg temperature(A)')
             res = self.ResourceManager()
             res.write('SYSTem:REM')
             res.write('SYSTem:PRESet')
@@ -202,7 +202,7 @@ class KEYSIGHT34461A:
             sheet.write(2, 1, min_value)
             sheet.write(3, 1, avg_value)
             book.save(path)
-            print("温度测试样本数量=%d 最大值=%s 最小值=%s 平均值=%f" % (count, max_value, min_value, avg_value))
+            print("Temperature samples=%d max=%s min=%s avg=%f" % (count, max_value, min_value, avg_value))
 
         finally:
             res.write('*CLS')

@@ -1,6 +1,6 @@
-#Report/
-#lib/
-#common/
+Report/
+lib/
+common/
 *.pyc
-#*.xlsx
-#*.png
+*.xlsx
+*.png

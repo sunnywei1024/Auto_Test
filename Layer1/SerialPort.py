@@ -1,6 +1,6 @@
 """
 Created on Sep 11, 2026
-Chicago
+shanghai
 @author: lijiangwei
 
 Based on pyvisa and pyvisa-py, which are open-source libraries for controlling instruments via 
@@ -82,7 +82,7 @@ class SerialPort:
         # If the input is "COMx", convert it to "ASRLx::INSTR"
         if port.upper().startswith("COM"):
             return f"ASRL{int(port[3:])}::INSTR"
-        # 已经是 "ASRLx::INSTR" 形式
+        # already in the "ASRLx::INSTR" form
         if "::" in port:
             return port
         return f"ASRL{port}::INSTR"
@@ -227,14 +227,14 @@ if __name__ == "__main__":
     serial_port = SerialPort.list_serial_resources()
     print("Available serial port resources:", serial_port)
     print("First available serial port:", serial_port[0])
-    # 示例: 打开 COM3 (ASRL3), 9600-8-N-1
+    # example: open COM3 (ASRL3), 9600-8-N-1
     ser = SerialPort(port=serial_port[0] if serial_port else None, baud_rate=256000, timeout=2000)
     ser.open()
     print("Serial port opened:", ser.instrument.resource_name)
-    # 十六进制发送
-    ser.write(num_list, is_hex=True)  # 等价于 "AT\r\n"
+    # send in hexadecimal
+    ser.write(num_list, is_hex=True)  # equivalent to "AT\r\n"
     time.sleep(3)
-    # 字符串发送
+    # send as a string
     # ser.write("AT\r\n", is_hex=False)
     # time.sleep(0.5)
     # reply = ser.read()

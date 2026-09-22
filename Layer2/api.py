@@ -6,6 +6,7 @@ Chicago
 import time
 import os
 import sys 
+import importlib
 
 # Ensure the project root (the folder containing Layer1/Layer2/Layer3) is on
 # sys.path, so these packages can be imported regardless of the current directory.
@@ -16,8 +17,11 @@ if _project_root not in sys.path:
 from xlutils.copy import copy
 from Layer1 import GK_I2C
 from Layer1 import pyQueen
+from Layer1.KEYSIGHT34461A import *
 from Layer1.MXO4 import *
 from Layer1.SerialPort import *
+from Layer1.PS9080 import *
+from Layer1.EL63200A import *
 from Layer2.TestInput import *
 
 class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
@@ -43,7 +47,16 @@ class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
                     names[i['设备名称']] = SerialPort(port=i['设备地址'])  
             elif i['设备类型']=='Multimeter':
                 if i['设备型号'] =='34461A':
-                    names[i['设备名称']] = SerialPort(port=i['设备地址'])  
+                    if 'I' in i['设备名称']:
+                        names[i['设备名称']] = KEYSIGHT34461A(i['设备地址'],'I')
+                    else:
+                        names[i['设备名称']] = KEYSIGHT34461A(i['设备地址'],'V')
+            elif i['设备类型']=='ELoad':
+                if i['设备型号'] =='63200A':
+                    names[i['设备名称']] = EL63200A(i['设备地址'])
+            elif i['设备类型']=='PSU':
+                if i['设备型号'] =='PS9080':
+                    names[i['设备名称']] = PS9080(i['设备地址'])
   
 
     def instrs_close(self, *instrs):
@@ -60,6 +73,12 @@ class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
                     names[i['设备名称']].close()
             elif i['设备类型']=='Multimeter':
                 if i['设备型号'] =='34461A':
+                    names[i['设备名称']].close()
+            elif i['设备类型']=='ELoad':
+                if i['设备型号'] =='63200A':
+                    names[i['设备名称']].close()
+            elif i['设备类型']=='PSU':
+                if i['设备型号'] =='PS9080':
                     names[i['设备名称']].close()
             
 if __name__ == "__main__":

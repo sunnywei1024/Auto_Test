@@ -1,41 +1,50 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sep 11, 2026
-Chicago
+Shanghai
 @author: lijiangwei
 
 R&S MXO 4 Series Driver (Base RsInstrument)
 ==============================================
 
-This《R&S MXO 4 系列示波器 User Manual》中的 SCPI 远程控制命令,
-封装了继承自 :class:`RsInstrument` 的示波器驱动类 :class:`MXO4`, 主要功能包括:
+This driver wraps the SCPI remote control commands of the
+"R&S MXO 4 Series Oscilloscope User Manual" into the scope driver class
+:class:`MXO4`, which inherits from :class:`RsInstrument`. Main features:
 
-1. 仪器连接 / 复位 / 身份识别 / 错误查询
-2. 通道 (垂直) 与水平 (时基) 配置
-3. 触发系统配置: 边沿 / 脉宽 / 毛刺 / 矮脉冲 / 窗口 / 超时 / 码型 / 串行总线触发
-4. 协议分析 (串行总线解码): I2C / SPI / UART 的配置与解码结果读取
-5. 波形采集: 单次 / 连续 / 停止, 读取波形数据 (ASCII / 二进制)
-6. 波形保存: 导出 CSV 文件、保存原始数据、截屏保存
-7. 眼图分析 (Eye Diagram): 眼图配置与眼高/眼宽/眼幅度测量
-8. 抖动分析 (Jitter): 高级抖动分析 (快速开始 / 手动分量) 与结果读取
+1. Instrument connection / reset / identification / error query
+2. Channel (vertical) and horizontal (timebase) configuration
+3. Trigger system configuration: edge / width / glitch / runt / window /
+   timeout / interval / pattern / serial bus trigger
+4. Protocol analysis (serial bus decoding): I2C / SPI / UART configuration and
+   decoding result readout
+5. Waveform acquisition: single / continuous / stop, reading waveform data
+   (ASCII / binary)
+6. Waveform saving: export CSV files, save raw data, save screenshots
+7. Eye diagram analysis: eye configuration and eye height / eye width /
+   eye amplitude measurements
+8. Jitter analysis: advanced jitter analysis (quick start / manual components)
+   and result readout
 
-依赖安装::
+Installation::
 
     pip install RsInstrument
 
-还需要在 PC 上安装 VISA 后端, 例如 R&S VISA 或 NI-VISA。
-(仅使用 TCPIP socket 时也可用 ``SelectVisa='socket'`` 选项, 无需任何 VISA。)
+A VISA backend (for example R&S VISA or NI-VISA) must also be installed on the
+PC. When only a TCPIP socket is used, the option ``SelectVisa='socket'`` can be
+used instead, which needs no VISA at all.
 
-连接方式 (VISA 资源字符串示例)::
+Connection methods (VISA resource string examples)::
 
     TCPIP::192.168.1.100::INSTR
     TCPIP::192.168.1.100::hislip0::INSTR
     USB::0x0AAD::0x0A0C::xxxxxx::INSTR
 
-注意:
-    * 串行总线解码 (协议分析) 与串行总线触发需要仪器安装相应的选件许可
-      (例如 I2C/SPI: K510, UART/RS-232/422/485: K520 等)。
-    * 不同固件版本个别命令参数可能略有差异, 已尽量按手册标准语法编写。
+Notes:
+    * Serial bus decoding (protocol analysis) and serial bus triggering require
+      the corresponding option licence in the instrument (for example
+      I2C/SPI: K510, UART/RS-232/422/485: K520, ...).
+    * Individual command parameters may differ slightly between firmware
+      versions, the commands below follow the standard manual syntax.
 """
 
 import csv
@@ -43,63 +52,63 @@ import os
 import time
 from enum import Enum
 
-from RsInstrument import *  # noqa: F401,F403  提供 RsInstrument 基类与 BinFloatFormat 等枚举
+from RsInstrument import *  # noqa: F401,F403  provides the RsInstrument base class and BinFloatFormat enums
 
 
 
 
 # ==============================================================================
-# 枚举定义 (与 MXO4 SCPI 参数一一对应)
+# Enumerations (one to one mapping with the MXO4 SCPI parameters)
 # ==============================================================================
 
 class TriggerType(Enum):
-    """触发类型 ``TRIGger:EVENt1:TYPe``"""
-    EDGE = "EDGE"                # 边沿触发
-    GLITCH = "GLITch"            # 毛刺触发
-    WIDTH = "WIDTh"              # 脉宽触发
-    RUNT = "RUNT"                # 矮脉冲触发
-    WINDOW = "WINdow"            # 窗口触发
-    TIMEOUT = "TIMeout"          # 超时触发
-    INTERVAL = "INTerval"        # 间隔触发
-    SLEW_RATE = "SLEWrate"       # 斜率触发
-    DATA_TO_CLOCK = "DATatoclock"  # 数据到时钟 (建立/保持时间) 触发
-    STATE = "STATe"              # 状态触发
-    PATTERN = "PATtern"          # 码型触发
-    SERIAL_BUS = "SERialbus"     # 串行总线触发 (协议触发)
+    """Trigger type ``TRIGger:EVENt1:TYPe``"""
+    EDGE = "EDGE"                # edge trigger
+    GLITCH = "GLITch"            # glitch trigger
+    WIDTH = "WIDTh"              # width trigger
+    RUNT = "RUNT"                # runt trigger
+    WINDOW = "WINdow"            # window trigger
+    TIMEOUT = "TIMeout"          # timeout trigger
+    INTERVAL = "INTerval"        # interval trigger
+    SLEW_RATE = "SLEWrate"       # slew rate trigger
+    DATA_TO_CLOCK = "DATatoclock"  # data to clock (setup/hold time) trigger
+    STATE = "STATe"              # state trigger
+    PATTERN = "PATtern"          # pattern trigger
+    SERIAL_BUS = "SERialbus"     # serial bus trigger (protocol trigger)
 
 
 class EdgeSlope(Enum):
-    """边沿方向 ``TRIGger:EVENt1:EDGE:SLOPe``"""
-    POSITIVE = "POSitive"        # 上升沿
-    NEGATIVE = "NEGative"        # 下降沿
-    EITHER = "EITHer"            # 任意沿
+    """Edge slope ``TRIGger:EVENt1:EDGE:SLOPe``"""
+    POSITIVE = "POSitive"        # rising edge
+    NEGATIVE = "NEGative"        # falling edge
+    EITHER = "EITHer"            # either edge
 
 
 class TriggerMode(Enum):
-    """触发模式 ``TRIGger:MODE``"""
-    AUTO = "AUTO"                # 自动 (无触发事件时自由运行)
-    NORMAL = "NORMal"            # 正常 (无触发事件时等待)
-    FREE_RUN = "FREErun"         # 自由运行
+    """Trigger mode ``TRIGger:MODE``"""
+    AUTO = "AUTO"                # auto (free running when no trigger event)
+    NORMAL = "NORMal"            # normal (waits when no trigger event)
+    FREE_RUN = "FREErun"         # free run
 
 
 class ChannelCoupling(Enum):
-    """通道耦合 ``CHANnel<n>:COUPling``"""
-    DC = "DCLimit"               # 直流 (限幅)
-    AC = "ACLimit"               # 交流 (限幅)
-    GND = "GND"                  # 接地
+    """Channel coupling ``CHANnel<n>:COUPling``"""
+    DC = "DCLimit"               # DC (terminated)
+    AC = "ACLimit"               # AC (terminated)
+    GND = "GND"                  # ground
 
 
 class AcquisitionMode(Enum):
-    """采集模式 ``ACQuire:MODe``"""
-    RTIME = "RTIMe"              # 实时
-    PEAK = "PEAK"                # 峰值检测
-    AVERAGE = "AVERage"          # 平均
-    HRES = "HRESolution"         # 高分辨率
-    ERES = "ERESolution"         # 增强分辨率
+    """Acquisition mode ``ACQuire:MODe``"""
+    RTIME = "RTIMe"              # real time
+    PEAK = "PEAK"                # peak detect
+    AVERAGE = "AVERage"          # average
+    HRES = "HRESolution"         # high resolution
+    ERES = "ERESolution"         # enhanced resolution
 
 
 class SampleRateMode(Enum):
-    """采样率模式 / SR 模式 ``ACQuire:SRATe:MODE``。"""
+    """Sample rate mode / SR mode ``ACQuire:SRATe:MODE``."""
     AUTO = "AUTO"
     MANUAL = "MANual"
     NORMAL = "NORMal"
@@ -108,7 +117,7 @@ class SampleRateMode(Enum):
 
 
 class BusType(Enum):
-    """串行总线 (协议) 类型 ``BUS<n>:TYPE``"""
+    """Serial bus (protocol) type ``BUS<n>:TYPE``"""
     I2C = "I2C"                  # I2C (Inter-IC)
     SPI = "SPI"                  # SPI
     QSPI = "QSPI"                # QSPI (Quad SPI)
@@ -116,7 +125,7 @@ class BusType(Enum):
     CAN = "CAN"                  # CAN
     LIN = "LIN"                  # LIN
     FLEXRAY = "FLEXray"          # FlexRay
-    I2S = "I2S"                  # I2S 音频
+    I2S = "I2S"                  # I2S audio
     MIL1553 = "MIL"              # MIL-STD-1553
     ARINC429 = "ARINc"           # ARINC 429
     SENT = "SENT"                # SENT
@@ -124,7 +133,7 @@ class BusType(Enum):
 
 
 class I2CTriggerCondition(Enum):
-    """I2C 串行总线触发条件"""
+    """I2C serial bus trigger condition"""
     START = "STARt"
     STOP = "STOP"
     RESTART = "RESTart"
@@ -135,7 +144,7 @@ class I2CTriggerCondition(Enum):
 
 
 class UARTTriggerCondition(Enum):
-    """UART 串行总线触发条件"""
+    """UART serial bus trigger condition"""
     START = "STBT"
     STOP = "STOP"
     DATA = "DATA"
@@ -145,7 +154,7 @@ class UARTTriggerCondition(Enum):
 
 
 class UARTParity(Enum):
-    """UART 校验位"""
+    """UART parity"""
     NONE = "NONE"
     EVEN = "EVEN"
     ODD = "ODD"
@@ -159,26 +168,26 @@ class UARTPOLarity(Enum):
     IDLHigh = "IDLHIGH"
 
 class UARTBitOrder(Enum):
-    """UART 位序"""
+    """UART bit order"""
     MSB_FIRST = "MSBF"
     LSB_FIRST = "LSBF"
 
 
 class SPIPolarity(Enum):
-    """SPI 时钟极性"""
-    IDLE_LOW = "IDLELOW"     # 空闲低电平
-    IDLE_HIGH = "IDLEHIGH"   # 空闲高电平
+    """SPI clock polarity"""
+    IDLE_LOW = "IDLELOW"     # idle low
+    IDLE_HIGH = "IDLEHIGH"   # idle high
 
 
 class STOPBit(Enum):
-    """SPI 时钟极性"""
-    ONE_BIT = "B1"     # 1 个停止位
-    ONE_P_FIVE_BITS = "B15"  # 1.5 个停止位
-    TWO_BITS = "B2"    # 2 个停止位
+    """Number of stop bits"""
+    ONE_BIT = "B1"     # 1 stop bit
+    ONE_P_FIVE_BITS = "B15"  # 1.5 stop bits
+    TWO_BITS = "B2"    # 2 stop bits
 
 
 class WaveformFormat(Enum):
-    """波形数据格式 ``FORMat:DATA``"""
+    """Waveform data format ``FORMat:DATA``"""
     ASCII = "ASC"
     BINARY_FLOAT32 = "REAL,32"
     BINARY_FLOAT64 = "REAL,64"
@@ -186,130 +195,134 @@ class WaveformFormat(Enum):
 
 
 class CursorFunction(Enum):
-    """光标类型 ``CURSor<n>:FUNCtion``"""
-    VERTICAL = "VERTical"      # 垂直光标 X1/X2, 测时间 (ΔX)
-    HORIZONTAL = "HORizontal"  # 水平光标 Y1/Y2, 测幅度 (ΔY)
-    PAIRED = "PAIRed"          # 垂直 + 水平同时显示
+    """Cursor type ``CURSor<n>:FUNCtion``"""
+    VERTICAL = "VERTical"      # vertical cursors X1/X2, measure time (delta X)
+    HORIZONTAL = "HORizontal"  # horizontal cursors Y1/Y2, measure amplitude (delta Y)
+    PAIRED = "PAIRed"          # show vertical and horizontal cursors together
 
 
 class EyeMeasurement(Enum):
-    """眼图测量项 (MEASurement 的 MAIN / ADDitional)"""
-    EYE_HEIGHT = "EHEight"          # 眼高 (Eye Height)
-    EYE_WIDTH = "EWIDth"            # 眼宽 (Eye Width)
-    EYE_AMPLITUDE = "EAMPlitude"    # 眼幅度 (Eye Amplitude)
+    """Eye diagram measurement item (MEASurement MAIN / ADDitional)"""
+    EYE_HEIGHT = "EHEight"          # eye height
+    EYE_WIDTH = "EWIDth"            # eye width
+    EYE_AMPLITUDE = "EAMPlitude"    # eye amplitude
 
 
 class JitterComponent(Enum):
-    """高级抖动分析分量 (对应 COMPonents 编号)"""
-    TJ_AT_BER = 4     # 指定误码率下的总抖动 Total Jitter @ BER
-    RJ = 5            # 随机抖动 Random Jitter
-    TJ = 7            # 总抖动 Total Jitter
-    DJ = 8            # 确定性抖动 Deterministic Jitter
-    DDJ = 9           # 数据相关抖动 Data-Dependent Jitter
-    DCD = 10          # 占空比失真 Duty Cycle Distortion
-    PJ = 11           # 周期性抖动 Periodic Jitter
-    ISI = 12          # 符号间干扰 Inter-Symbol Interference
+    """Advanced jitter analysis component (COMPonents index)"""
+    TJ_AT_BER = 4     # total jitter at a given BER
+    RJ = 5            # random jitter
+    TJ = 7            # total jitter
+    DJ = 8            # deterministic jitter
+    DDJ = 9           # data-dependent jitter
+    DCD = 10          # duty cycle distortion
+    PJ = 11           # periodic jitter
+    ISI = 12          # inter-symbol interference
 
 
 # ==============================================================================
-# 驱动类
+# Driver class
 # ==============================================================================
 
 class MXO4(RsInstrument):
-    """R&S MXO 4 系列示波器驱动类 (继承自 RsInstrument)。"""
+    """R&S MXO 4 series oscilloscope driver class (inherits from RsInstrument)."""
 
     # ------------------------------------------------------------------
-    # 连接管理
+    # Connection management
     # ------------------------------------------------------------------
     def __init__(self, resource, timeout=60000, reset=True, idn=True, options="SelectVisa='rs'"):
         """
-        初始化仪器连接 (RsInstrument 在构造时即建立连接)。
+        Instrument connection (RsInstrument connects in the constructor).
   
-        :param resource: VISA 资源字符串, 例如 ``'TCPIP::192.168.1.100::INSTR'``
-        :param timeout:  VISA 读写超时, 单位 ms (采集大数据时建议调大)
-        :param reset:    初始化时是否执行 ``*RST``
-        :param idn:      初始化时是否执行 ``*IDN?`` 校验仪器
-        :param options:  RsInstrument 初始化选项, 例如 ``"SelectVisa='ni'"``
-                        或 ``"SelectVisa='socket'"``; 不指定时自动探测已安装的 VISA 后端
+        :param resource: VISA resource string, e.g. ``'TCPIP::192.168.1.100::INSTR'``
+        :param timeout:  VISA read/write timeout in ms (increase it when large
+                         amounts of data are acquired)
+        :param reset:    whether ``*RST`` is executed during initialization
+        :param idn:      whether ``*IDN?`` is used to verify the instrument
+        :param options:  RsInstrument initialization options, e.g.
+                        ``"SelectVisa='ni'"`` or ``"SelectVisa='socket'"``;
+                        when omitted the installed VISA backend is detected
         """
         super().__init__(resource, id_query=idn, reset=reset, options=options)
-        # 兼容旧接口的属性
+        # attributes kept for compatibility with the old interface
         self.resource = resource
         self.timeout = timeout
         self.visa_timeout = timeout
         if self.idn_string:
-            print(f"已连接: {self.idn_string}")
+            print(f"Connected: {self.idn_string}")
 
     def connect(self):
-        """RsInstrument 在构造时已建立连接, 此方法仅为兼容旧接口保留。"""
+        """RsInstrument connects in the constructor, kept for compatibility."""
         return self
 
     def close(self):
-        """关闭连接 (会话已失效时忽略异常, 不使程序崩溃)。"""
+        """Close the connection (errors are ignored once the session is dead)."""
         try:
             super().close()
         except Exception as e:
-            print(f"警告: 关闭仪器会话失败 (忽略): {e}")
+            print(f"Warning: closing the instrument session failed (ignored): {e}")
 
     # ------------------------------------------------------------------
-    # 基础读写与通用命令
+    # Low level read / write and common commands
     # ------------------------------------------------------------------
-    # write / query / write_str / query_str / query_bin_block 等底层方法
-    # 均继承自 RsInstrument, 无需在此重复实现。
+    # The low level methods write / query / write_str / query_str /
+    # query_bin_block are inherited from RsInstrument and need no duplication.
 
     def write_list(self, cmds):
-        """批量发送多条命令 (list)。"""
+        """Send several commands in one go (list)."""
         for c in cmds:
             self.write(c)
 
     def reset(self):
-        """复位到预设状态 ``*RST`` 并等待完成。"""
+        """Reset to the preset state ``*RST`` and wait for completion."""
         super().reset()
         self.wait_opc()
 
     def get_error(self):
-        """读取一条错误 ``SYSTem:ERRor?``, 返回字符串。"""
+        """Read one error ``SYSTem:ERRor?``, returns a string."""
         return self.query("SYSTem:ERRor?")
 
     def opc_polling(self):
-        """轮询操作状态寄存器, 等待采集停止 (bit4 为 0)。"""
+        """Poll the operation status register until acquisition stops (bit4 = 0)."""
         while True:
             cond = int(self.query("STATus:OPERation:CONDition?"))
-            # 采集运行位 (具体 bit 请对照手册 "Operation Status Register" 章节)
-            if cond & 0x10 == 0:   # bit4 为 0 表示已不在采集
+            # acquisition running bit (see the "Operation Status Register" chapter
+            # of the manual for the exact bit assignment)
+            if cond & 0x10 == 0:   # bit4 = 0 means acquisition is no longer running
                 break
             time.sleep(0.05)
 
     def wait_opc(self, timeout=None):
-        """发送 ``*OPC?`` 等待之前所有命令执行完毕。"""
+        """Send ``*OPC?`` and wait until all previous commands have finished."""
         if timeout:
             self.query_opc(timeout)
         else:
             self.query_opc()
 
     def set_display_update(self, on=True):
-        """远程控制时是否刷新屏幕显示 ``SYSTem:DISPlay:UPDate``。"""
+        """Enable/disable the screen update in remote control ``SYSTem:DISPlay:UPDate``."""
         self.write(f"SYSTem:DISPlay:UPDate {'ON' if on else 'OFF'}")
 
     def set_display_brightness(self, brightness=100):
         """
-        设置屏幕亮度 ``DISPlay:BACKlight:BRIGtness``。  
+        Set the screen brightness ``DISPlay:BACKlight:BRIGtness``.  
 
-        :param brightness: 触摸屏背光亮度, 范围 5~100 (超出范围会被钳位)
+        :param brightness: touch screen backlight brightness, range 5~100
+                           (values outside the range are clamped)
         """
         val = int(brightness)
         val = max(5, min(100, val))
         self.write(f"DISPlay:BACKlight:BRIGtness {val}")
 
     def get_display_brightness(self):
-        """查询屏幕亮度 ``DISPlay:BACKlight:BRIGtness?``, 返回 int (5~100)。"""
+        """Query the screen brightness ``DISPlay:BACKlight:BRIGtness?``, returns int (5~100)."""
         return int(self.query("DISPlay:BACKlight:BRIGtness?"))
 
     def set_display_dimming(self, timeout="OFF"):
         """
-        设置屏幕自动变暗 (省电) 时间 ``DISPlay:BACKlight:DIMMing``。
+        Set the automatic screen dimming (power save) time ``DISPlay:BACKlight:DIMMing``.
 
-        :param timeout: 无操作多久后降低屏幕亮度,
+        :param timeout: how long without user action before the screen dims down,
                         OFF / T1Minute / T2Minutes / T3Minutes / T5Minutes /
                         T10Minutes / T15Minutes / T20Minutes / T25Minutes /
                         T30Minutes / T45Minutes / T1Hour / T2Hours / T3Hours / T4Hours
@@ -318,32 +331,33 @@ class MXO4(RsInstrument):
 
     def set_signal_intensity(self, intensity=50):
         """
-        设置信号 (波形) 亮度 ``DISPlay:INTensity``。
+        Set the signal (waveform) intensity ``DISPlay:INTensity``.
 
-        该值决定波形迹线在屏幕上的显示强弱, 与屏幕背光亮度
-        (``set_display_brightness``) 是两套独立设置。
+        This value controls how strong the waveform traces appear on the
+        screen; it is an independent setting from the screen backlight
+        brightness (``set_display_brightness``).
 
-        :param intensity: 波形亮度百分比, 范围 0~100 (默认 50, 0 为不可见)
+        :param intensity: waveform intensity in percent, range 0~100
+                          (default 50, 0 makes the trace invisible)
         """
         val = float(intensity)
         val = max(0.0, min(100.0, val))
         self.write(f"DISPlay:INTensity {val}")
-
     def get_signal_intensity(self):
-        """查询信号 (波形) 亮度 ``DISPlay:INTensity?``, 返回 float (0~100)。"""
+        """Query the signal (waveform) intensity ``DISPlay:INTensity?``, returns float (0~100)."""
         return float(self.query("DISPlay:INTensity?"))
 
     def autoset(self):
-        """自动设置 ``AUTOSet EXECUTE`` (等效 ``AUToscale``)。"""
+        """Automatic setup ``AUTOSet EXECUTE`` (equivalent to ``AUToscale``)."""
         self.write("AUTOSet EXECUTE")
         self.wait_opc()
 
     # ------------------------------------------------------------------
-    # 通道 (垂直) 配置
+    # Channel (vertical) configuration
     # ------------------------------------------------------------------
     @staticmethod
     def _ch(channel):
-        """通道号归一化, 支持 int(1~4) 或 str('1'~'4' / 'C1')。"""
+        """Normalize a channel number, accepts int(1~4) or str('1'~'4' / 'C1')."""
         if isinstance(channel, int):
             return str(channel)
         s = str(channel).upper().replace("CHAN", "").replace("CH", "").replace("C", "")
@@ -351,181 +365,185 @@ class MXO4(RsInstrument):
 
     @staticmethod
     def _src(source):
-        """触发/解码信源归一化: 支持 int(1~4)->'C1', 或直接传 'C1'/'SBUS1'/'EXT'/'LINE'。"""
+        """Normalize a trigger/decoder source: int(1~4) -> 'C1', or 'C1'/'SBUS1'/'EXT'/'LINE'."""
         if isinstance(source, int):
             return f"C{source}"
         s = str(source).upper()
         return s
 
     def channel_state(self, channel, on=True):
-        """开关通道 ``CHANnel<n>:STATe ON|OFF``。"""
+        """Switch a channel on/off ``CHANnel<n>:STATe ON|OFF``."""
         self.write(f"CHANnel{self._ch(channel)}:STATe {'ON' if on else 'OFF'}")
 
     def channel_coupling(self, channel, coupling=ChannelCoupling.DC):
-        """通道耦合 ``CHANnel<n>:COUPling``。"""
+        """Channel coupling ``CHANnel<n>:COUPling``."""
         val = coupling.value if isinstance(coupling, ChannelCoupling) else coupling
         self.write(f"CHANnel{self._ch(channel)}:COUPling {val}")
 
     def channel_range(self, channel, volts):
-        """垂直满量程 (V) ``CHANnel<n>:RANGe <NR3>``, 例如 2.0 表示 ±1V 满屏。"""
+        """Vertical full scale (V) ``CHANnel<n>:RANGe <NR3>``, e.g. 2.0 means ±1 V full screen."""
         self.write(f"CHANnel{self._ch(channel)}:RANGe {volts}")
 
     def channel_scale(self, channel, volts_per_div):
-        """垂直灵敏度 (V/div) ``CHANnel<n>:SCALe <NR3>``。"""
+        """Vertical sensitivity (V/div) ``CHANnel<n>:SCALe <NR3>``."""
         self.write(f"CHANnel{self._ch(channel)}:SCALe {volts_per_div}")
 
     def channel_offset(self, channel, volts):
-        """垂直偏置 (V) ``CHANnel<n>:OFFSet <NR3>``。"""
+        """Vertical offset (V) ``CHANnel<n>:OFFSet <NR3>``."""
         self.write(f"CHANnel{self._ch(channel)}:OFFSet {volts}")
 
     def channel_position(self, channel, divisions):
-        """垂直位置 (div) ``CHANnel<n>:POSition <NR3>``。"""
+        """Vertical position (div) ``CHANnel<n>:POSition <NR3>``."""
         self.write(f"CHANnel{self._ch(channel)}:POSition {divisions}")
 
     def channel_impedance(self, channel, ohms):
-        """输入阻抗 ``CHANnel<n>:IMPedance <NR3>`` (1e6 或 50)。"""
+        """Input impedance ``CHANnel<n>:IMPedance <NR3>`` (1e6 or 50)."""
         self.write(f"CHANnel{self._ch(channel)}:IMPedance {ohms}")
 
     def channel_label(self, channel, label):
         """
-        设置通道标签 ``DISPlay:SIGNal:LABel <signal>,<label>``。
+        Set a channel label ``DISPlay:SIGNal:LABel <signal>,<label>``.
 
-        MXO4 的通道标签命令不在 ``CHANnel`` 子树下 (MXO4 的 ``CHANnel`` 没有
-        LABel 命令), 而是通过 ``DISPlay:SIGNal:LABel`` 设置,
-        例如 ``DISPlay:SIGNal:LABel C1,'VBUS'``。
+        The channel label command of the MXO4 is not inside the ``CHANnel``
+        subtree (MXO4 ``CHANnel`` has no LABel command), the label is set with
+        ``DISPlay:SIGNal:LABel``, e.g. ``DISPlay:SIGNal:LABel C1,'VBUS'``.
 
-        :param channel: 通道号 (int 1~4, 或 '1'~'4' / 'C1' 等)
-        :param label:   标签文本 (请勿包含单引号)
+        :param channel: channel number (int 1~4, or '1'~'4' / 'C1', ...)
+        :param label:   label text (do not use single quotes inside)
         """
         signal = "C" + self._ch(channel)
         self.write(f"DISPlay:SIGNal:LABel {signal},'{label}'")
 
     def get_channel_label(self, channel):
         """
-        查询通道标签 ``DISPlay:SIGNal:LABel?``, 返回标签字符串。
+        Query a channel label ``DISPlay:SIGNal:LABel?``, returns the label string.
 
-        :param channel: 通道号 (该查询本身不带信源参数, 返回当前信源的标签)
+        :param channel: channel number (the query takes no source parameter
+                        itself, it returns the label of the current source)
         """
         return self.query("DISPlay:SIGNal:LABel?")
 
     def digital_channel_label(self, digital, label):
         """
-        设置数字通道 (MSO 逻辑通道) 标签 ``DIGital<n>:LABel '<label>'``。
+        Set a digital channel (MSO logic channel) label ``DIGital<n>:LABel '<label>'``.
 
-        数字通道标签与模拟通道标签是两套独立命令:
-          * 模拟通道: ``DISPlay:SIGNal:LABel C1,'LABEL'``  (见 ``channel_label``)
-          * 数字通道: ``DIGital<n>:LABel 'LABEL'``          (n 对应 D0~D15)
+        Digital and analog channel labels use two independent commands:
+          * analog channel: ``DISPlay:SIGNal:LABel C1,'LABEL'``  (see ``channel_label``)
+          * digital channel: ``DIGital<n>:LABel 'LABEL'``        (n is D0~D15)
 
-        :param digital: 数字通道号 (int 0~15, 对应 D0~D15)
-        :param label:   标签文本 (请勿包含单引号)
+        :param digital: digital channel number (int 0~15, i.e. D0~D15)
+        :param label:   label text (do not use single quotes inside)
         """
         self.write(f"DIGital{int(digital)}:LABel '{label}'")
 
     def get_digital_channel_label(self, digital):
-        """查询数字通道标签 ``DIGital<n>:LABel?``, 返回标签字符串。"""
+        """Query a digital channel label ``DIGital<n>:LABel?``, returns the label string."""
         return self.query(f"DIGital{int(digital)}:LABel?")
 
     def channel_bandwidth(self, channel, bandwidth="FULL"):
         """
-        设置通道带宽限制 ``CHANnel<n>:BANDwidth``。
+        Set the channel bandwidth limit ``CHANnel<n>:BANDwidth``.
 
-        :param channel:   通道号
-        :param bandwidth: 带宽限制值:
-                          * 数值 (Hz), 例如 20e6 / 50e6 / 100e6 / 200e6 / 350e6 / 500e6
-                          * 字符串 'FULL' (满带宽, 关闭带宽限制)
+        :param channel:   channel number
+        :param bandwidth: bandwidth limit value:
+                          * a number (Hz), e.g. 20e6 / 50e6 / 100e6 / 200e6 / 350e6 / 500e6
+                          * the string 'FULL' (full bandwidth, bandwidth limit off)
         """
         val = bandwidth.upper() if isinstance(bandwidth, str) else bandwidth
         self.write(f"CHANnel{self._ch(channel)}:BANDwidth {val}")
 
     def get_channel_bandwidth(self, channel):
-        """查询通道带宽限制 ``CHANnel<n>:BANDwidth?``, 返回 Hz 数值或 'FULL'。"""
+        """Query the channel bandwidth limit ``CHANnel<n>:BANDwidth?``, returns Hz or 'FULL'."""
         return self.query(f"CHANnel{self._ch(channel)}:BANDwidth?")
 
     # ------------------------------------------------------------------
-    # 水平 (时基) 配置
+    # Horizontal (timebase) configuration
     # ------------------------------------------------------------------
     def timebase_scale(self, sec_per_div):
-        """时基 (s/div) ``TIMebase:SCALe <NR3>``。"""
+        """Timebase (s/div) ``TIMebase:SCALe <NR3>``."""
         self.write(f"TIMebase:SCALe {sec_per_div}")
 
     def timebase_range(self, seconds):
-        """整屏时间 (s) ``TIMebase:RANGe <NR3>``。"""
+        """Full screen time (s) ``TIMebase:RANGe <NR3>``."""
         self.write(f"TIMebase:RANGe {seconds}")
 
     def timebase_position(self, percent):
         """
-        设置水平位置 (参考点位置) ``TIMebase:REFerence <NR3>``, 单位为屏幕百分比。
+        Set the horizontal position (reference point) ``TIMebase:REFerence <NR3>``,
+        the unit is percent of the screen.
 
-        MXO4 的水平位置命令是 ``TIMebase:REFerence`` (0~100%),
-        而不是旧型号的 ``HORizontal:POSition``。
+        The horizontal position command of the MXO4 is ``TIMebase:REFerence``
+        (0~100%), not ``HORizontal:POSition`` as on older models.
 
-        :param percent: 参考点位置, 0~100 (%)
+        :param percent: reference point position, 0~100 (%)
         """
         self.write(f"TIMebase:REFerence {percent}")
 
     def get_timebase_position(self):
-        """查询水平位置 (参考点位置) ``TIMebase:REFerence?``, 返回百分比。"""
+        """Query the horizontal position (reference point) ``TIMebase:REFerence?`` in percent."""
         return self.query("TIMebase:REFerence?")
 
     def timebase_offset(self, seconds):
         """
-        设置触发偏置 (trigger offset) ``TIMebase:HORizontal:POSition <NR3>``, 单位为秒。
+        Set the trigger offset ``TIMebase:HORizontal:POSition <NR3>``, unit s.
 
-        该值表示参考点到触发点 (波形零点) 之间的时间距离。
+        The value is the time distance between the reference point and the
+        trigger point (the waveform zero point).
 
-        :param seconds: 触发偏置 (s)
+        :param seconds: trigger offset (s)
         """
         self.write(f"TIMebase:HORizontal:POSition {seconds}")
 
     def get_timebase_offset(self):
-        """查询触发偏置 ``TIMebase:HORizontal:POSition?``, 返回秒数。"""
+        """Query the trigger offset ``TIMebase:HORizontal:POSition?``, in seconds."""
         return self.query("TIMebase:HORizontal:POSition?")
 
     # ------------------------------------------------------------------
-    # 采集控制
+    # Acquisition control
     # ------------------------------------------------------------------
 
     def max_acquisition_points(self):
         """
-            尝试查询仪器支持的最大采集点数（多种常见 SCPI 变体）。
-            返回 int (最大点数) 或 None（查询失败）。
+            Try to query the maximum number of acquisition points supported by
+            the instrument (several common SCPI variants are tried).
+            Returns int (maximum points) or None when the query failed.
         """
         candidates = [
-            "ACQuire:POINts:MAX?",   # 常见形式
-            "ACQ:POINts:MAX?",       # 可能的缩写
-            "TIMebase:RECordlength:MAX?",  # 备用尝试（少见）
-            "ACQuire:POINts? MAX",   # 某些仪器的变体（不常见）
+            "ACQuire:POINts:MAX?",   # common form
+            "ACQ:POINts:MAX?",       # possible abbreviation
+            "TIMebase:RECordlength:MAX?",  # fallback attempt (rare)
+            "ACQuire:POINts? MAX",   # variant of some instruments (uncommon)
         ]
         for cmd in candidates:
             try:
                 resp = self.query(cmd)  
                 if resp is None:
                     continue
-                # 有的返回可能含文本，先尝试数值解析
+                # the answer may contain text, so try a numeric parse first
                 val = float(resp.strip().split()[0])
                 return int(val)
             except Exception:
-                # 捕获任何查询/解析错误，尝试下一个命令
+                # catch any query/parse error and try the next command
                 continue
-        # 如果都失败，返回 None 表示无法确定
+        # when everything failed, return None to signal "unknown"
         return None
     
     def acquisition_mode(self, mode=AcquisitionMode.RTIME):
-        """采集模式 ``ACQuire:MODe``。"""
+        """Acquisition mode ``ACQuire:MODe``."""
         val = mode.value if isinstance(mode, AcquisitionMode) else mode
         self.write(f"ACQuire:MODe {val}")
 
     def acquisition_count(self, count):
-        """平均次数 ``ACQuire:COUNt <NR1>`` (仅平均模式有效)。"""
+        """Number of averages ``ACQuire:COUNt <NR1>`` (average mode only)."""
         self.write(f"ACQuire:COUNt {int(count)}")
 
     def acquisition_points(self):
-        """查询当前采集点数 ``ACQuire:POINts?``。"""
+        """Query the current number of acquisition points ``ACQuire:POINts?``."""
         return int(float(self.query("ACQuire:POINts?")))
 
     @staticmethod
     def _scpi_number(value):
-        """将数值/字符串转换为 SCPI 兼容的科学计数法表示, 例如 1E9 / 1.23E+09。"""
+        """Convert a number/string into a SCPI compatible scientific notation, e.g. 1E9 / 1.23E+09."""
         if isinstance(value, str):
             s = value.strip()
             if s.upper().endswith('E'):
@@ -533,11 +551,11 @@ class MXO4(RsInstrument):
             try:
                 num = float(s)
             except ValueError as exc:
-                raise ValueError(f"无法解析为数值: {value}") from exc
+                raise ValueError(f"cannot parse as a number: {value}") from exc
         else:
             num = float(value)
 
-        # 生成保留 12 位有效数字的科学计数法，确保 SCPI 兼容
+        # build scientific notation with 12 significant digits (SCPI compatible)
         text = f"{num:.12E}"
         text = text.replace("E+0", "E+")
         text = text.replace("E-0", "E-")
@@ -547,57 +565,59 @@ class MXO4(RsInstrument):
 
     def sample_rate(self, rate):
         """
-        设置采样率 ``ACQuire:SRATe <NR3>``。
+        Set the sample rate ``ACQuire:SRATe <NR3>``.
 
-        以科学计数法发送，允许接受普通数字或字符串表示 (如 1e9 / '1E9')。
+        The value is sent in scientific notation; a plain number or a string
+        such as 1e9 / '1E9' is accepted.
 
-        :param rate: 采样率 (samples/s), 例如 1e9 / 2.5e9 / 5e9 等
+        :param rate: sample rate (samples/s), e.g. 1e9 / 2.5e9 / 5e9
         """
         val = self._scpi_number(rate)
         self.write(f"ACQuire:SRATe {val}")
 
     def get_sample_rate(self):
-        """查询当前采样率 ``ACQuire:SRATe?``，返回 float。"""
+        """Query the current sample rate ``ACQuire:SRATe?``, returns float."""
         return float(self.query("ACQuire:SRATe?"))
 
     def sample_rate_mode(self, mode=SampleRateMode.AUTO):
         """
-        设置 SR 模式 / 采样率模式 ``ACQuire:SRATe:MODE``。
+        Set the SR mode / sample rate mode ``ACQuire:SRATe:MODE``.
 
-        常见模式通常为:
-          - AUTO     : 自动采样率模式
-          - MANual   : 手动采样率模式
-          - NORMAL   : 普通模式
-          - HRESolution: 高分辨率模式（如支持）
+        The usual modes are:
+          - AUTO     : automatic sample rate mode
+          - MANual   : manual sample rate mode
+          - NORMAL   : normal mode
+          - HRESolution: high resolution mode (if supported)
         """
         val = mode.value if isinstance(mode, SampleRateMode) else str(mode).upper()
         self.write(f"ACQuire:SRATe:MODE {val}")
 
     def get_sample_rate_mode(self):
-        """查询当前 SR 模式 ``ACQuire:SRATe:MODE?``。"""
+        """Query the current SR mode ``ACQuire:SRATe:MODE?``."""
         return self.query("ACQuire:SRATe:MODE?")
 
     def configure_sampling(self, timebase_seconds_per_div=None, sample_rate=None,
                           points=None, wait=True):
         """
-        一键配置采样率/记录深度/时基的辅助函数。
+        Helper that configures sample rate / record depth / timebase in one go.
 
-        规则：
-        1. 若给定 ``timebase_seconds_per_div``，先执行 ``TIMebase:SCALe``。
-        2. 若给定 ``points`` 与 ``timebase_seconds_per_div``，则按
+        Rules:
+        1. If ``timebase_seconds_per_div`` is given, ``TIMebase:SCALe`` is sent.
+        2. If ``points`` and ``timebase_seconds_per_div`` are given, the sample
+           rate is estimated as
            ``sample_rate = points / timebase_seconds_per_div / 10``
-           估算采样率；仅在未显式给出 ``sample_rate`` 时才自动填充。
-        3. 若给定 ``sample_rate``，执行 ``ACQuire:SRATe``。
-        4. 若给定 ``points``，执行 ``ACQuire:POINts``。
-        5. 最后可选 ``wait_opc`` 等待完成。
+           and only used when ``sample_rate`` was not given explicitly.
+        3. If ``sample_rate`` is given, ``ACQuire:SRATe`` is sent.
+        4. If ``points`` is given, ``ACQuire:POINts`` is sent.
+        5. Finally ``wait_opc`` can be used to wait for completion.
 
-        :param timebase_seconds_per_div: 时基 s/div, 例如 5e-6
-        :param sample_rate:              采样率 S/s, 如 1e9
-        :param points:                   记录深度点数, 如 1_000_000 或 '1M'
-        :param wait:                     是否等待命令完成
+        :param timebase_seconds_per_div: timebase in s/div, e.g. 5e-6
+        :param sample_rate:              sample rate in Sa/s, e.g. 1e9
+        :param points:                   record depth in points, e.g. 1_000_000 or '1M'
+        :param wait:                     whether to wait for command completion
         :return:                         tuple (timebase, sample_rate, points)
         """
-        # 允许传入字符串 '1M' / '1e6' / '1000000'
+        # a string such as '1M' / '1e6' / '1000000' is accepted
         if points is not None:
             if isinstance(points, str):
                 s = points.strip().upper()
@@ -607,15 +627,15 @@ class MXO4(RsInstrument):
                     try:
                         points_val = int(float(s))
                     except Exception as exc:
-                        raise ValueError(f"无法解析采集点数: {points}") from exc
+                        raise ValueError(f"cannot parse the number of points: {points}") from exc
             else:
                 points_val = int(points)
         else:
             points_val = None
 
         if timebase_seconds_per_div is not None and points_val is not None and sample_rate is None:
-            # 经验估算公式：sample_rate = points / timebase_seconds_per_div / 10
-            # 其中 10 为屏幕横向分辨率系数（典型近似）
+            # empirical formula: sample_rate = points / timebase_seconds_per_div / 10
+            # where 10 is the horizontal screen resolution factor (typical approximation)
             try:
                 sample_rate = int(points_val / (float(timebase_seconds_per_div) * 10.0)) 
             except Exception:
@@ -651,15 +671,15 @@ class MXO4(RsInstrument):
         return current_tb, current_sr, current_pts
 
     def set_memory_depth_1M(self, wait=True):
-        """将记录深度设置为 1 Mpts。"""
+        """Set the record depth to 1 Mpts."""
         return self.ensure_acquisition_points("1M", wait=wait)
 
     def auto_sampling_for_timebase(self, timebase_s_per_div, points="1M", wait=True):
         """
-        根据时基自动估算并配置采样率与深度。
+        Estimate and configure the sample rate and the depth from the timebase.
 
-        使用公式：sample_rate = points / timebase_s_per_div / 10
-        默认深度为 1 Mpts。
+        Uses the formula: sample_rate = points / timebase_s_per_div / 10
+        The default depth is 1 Mpts.
         """
         if isinstance(points, str):
             s = points.strip().upper()
@@ -680,15 +700,17 @@ class MXO4(RsInstrument):
 
     def set_acquisition_points(self, points, wait=True):
         """
-        设置采集点数 (record length / memory depth)。
+        Set the number of acquisition points (record length / memory depth).
 
-        发送命令 ``ACQuire:POINts <n>`` 来设置当前记录长度。
+        The command ``ACQuire:POINts <n>`` sets the current record length.
 
-        :param points: 要设置的点数 (int 可直接传入 1_000_000 或 '1M' / '1e6'等可被 int() 解析的值)
-        :param wait:   是否在设置后等待操作完成 (使用 *OPC?)，默认 True
-        :return:       设置后的点数 (int)
+        :param points: number of points to set (an int, or a value that int()
+                       can parse, e.g. 1_000_000 / '1M' / '1e6')
+        :param wait:   whether to wait for completion after setting (using
+                       *OPC?), default True
+        :return:       the number of points after setting (int)
         """
-        # 允许传入字符串 '1M' / '1e6' / '1000000'
+        # a string such as '1M' / '1e6' / '1000000' is accepted
         if isinstance(points, str):
             s = points.strip().upper()
             if s.endswith('M') and s[:-1].replace('.', '', 1).isdigit():
@@ -697,77 +719,78 @@ class MXO4(RsInstrument):
                 try:
                     points_val = int(float(s))
                 except Exception:
-                    raise ValueError(f"无法解析采集点数: {points}")
+                    raise ValueError(f"cannot parse the number of points: {points}")
         else:
             points_val = int(points)
 
-        # 发送设置命令
+        # send the setting command
         self.write(f"ACQuire:POINts {points_val}")
         if wait:
-            # 设置记录长度可能需要仪器内部重配置缓冲, 提升超时
+            # setting the record length may require an internal buffer
+            # reconfiguration, therefore the timeout is increased
             try:
-                self.wait_opc(timeout=600000)  # 最长 10 分钟以应对大深度重配置
+                self.wait_opc(timeout=600000)  # up to 10 minutes for a deep reconfiguration
             except Exception:
-                # 若等待失败, 仍继续返回设置值
+                # when the wait fails, still return the value that was set
                 pass
         return points_val
 
     def ensure_acquisition_points(self, target_points, wait=True):
         """
-        先查询当前采集深度, 若与目标不同则设置为目标点数。
+        Query the current acquisition depth and set it to the target if it differs.
 
-        :param target_points: 目标点数 (int 或可解析的字符串, 如 '1M')
-        :param wait: 是否在设置后等待完成
+        :param target_points: target number of points (int or a parseable string, e.g. '1M')
+        :param wait: whether to wait for completion after setting
         :return: (old_points, new_points, changed)
         """
         old = None
         try:
             old = self.acquisition_points()
         except Exception:
-            # 查询失败仍尝试设置
+            # when the query fails, still try to set the value
             old = None
         new = self.set_acquisition_points(target_points, wait=wait)
         changed = (old != new)
         return old, new, changed
 
     def run(self):
-        """连续运行 (RUN)。"""
+        """Run continuously (RUN)."""
         self.write("RUN")
 
     def single(self):
-        """单次采集 (SINGle / RUNSingle)。"""
+        """Single acquisition (SINGle / RUNSingle)."""
         self.write("SINGle")
 
     def stop(self):
-        """停止采集 (STOP)。"""
+        """Stop the acquisition (STOP)."""
         self.write("STOP")
 
     def single_and_wait(self, timeout=None):
-        """单次采集并等待完成 (SINGle;*OPC)。"""
+        """Single acquisition and wait for completion (SINGle;*OPC)."""
         self.write("SINGle")
         # self.wait_opc(timeout)
-        self.opc_polling()  #这里需要注意
+        self.opc_polling()  # note: the operation status is polled here
 
     # ------------------------------------------------------------------
-    # 触发系统
+    # Trigger system
     # ------------------------------------------------------------------
     def trigger_mode(self, mode=TriggerMode.AUTO):
-        """触发模式 ``TRIGger:MODE``。"""
+        """Trigger mode ``TRIGger:MODE``."""
         val = mode.value if isinstance(mode, TriggerMode) else mode
         self.write(f"TRIGger:MODE {val}")
 
     def trigger_source(self, source="C1"):
-        """触发源 ``TRIGger:EVENt1:SOURce`` (C1..C4 / D0..D15 / EXT / LINE / SBUS1..)。"""
+        """Trigger source ``TRIGger:EVENt1:SOURce`` (C1..C4 / D0..D15 / EXT / LINE / SBUS1..)."""
         self.write(f"TRIGger:EVENt1:SOURce {self._src(source)}")
 
     def trigger_level(self, level, source="C1"):
-        """触发电平 ``TRIGger:EVENt1:LEVel1:VALue``。"""
+        """Trigger level ``TRIGger:EVENt1:LEVel1:VALue``."""
         self.write(f"TRIGger:EVENt1:SOURce {self._src(source)}")
         self.write(f"TRIGger:EVENt1:LEVel1:VALue {level}")
 
-    # ---- 边沿触发 (最常用) ----
+    # ---- Edge trigger (most common) ----
     def configure_edge_trigger(self, source="C1", level=0.0, slope=EdgeSlope.POSITIVE):
-        """配置边沿触发。"""
+        """Configure an edge trigger."""
         sl = slope.value if isinstance(slope, EdgeSlope) else slope
         self.write_list([
             f"TRIGger:EVENt1:TYPe EDGE",
@@ -776,14 +799,15 @@ class MXO4(RsInstrument):
             f"TRIGger:EVENt1:LEVel1:VALue {level}",
         ])
 
-    # ---- 脉宽触发 ----
+    # ---- Width trigger ----
     def configure_width_trigger(self, source="C1", level=0.0,
                                 condition="WITHin", width=1e-6,
                                 slope=EdgeSlope.POSITIVE):
         """
-        脉宽触发: 在 ``condition`` (WITHin / OUTSide) 指定 ``width`` (s) 时触发。
+        Width trigger: triggers when the pulse width matches ``width`` (s) as
+        selected by ``condition`` (WITHin / OUTSide).
 
-        对应命令 ``TRIGger:EVENt1:WIDTh:CONDition`` / ``RANGe``。
+        Corresponding commands ``TRIGger:EVENt1:WIDTh:CONDition`` / ``RANGe``.
         """
         sl = slope.value if isinstance(slope, EdgeSlope) else slope
         self.write_list([
@@ -795,10 +819,10 @@ class MXO4(RsInstrument):
             f"TRIGger:EVENt1:EDGE:SLOPe {sl}",
         ])
 
-    # ---- 毛刺触发 ----
+    # ---- Glitch trigger ----
     def configure_glitch_trigger(self, source="C1", level=0.0, width=1e-9,
                                  polarity="POSitive"):
-        """毛刺触发: 小于 ``width`` (s) 的窄脉冲。"""
+        """Glitch trigger: narrow pulses shorter than ``width`` (s)."""
         self.write_list([
             f"TRIGger:EVENt1:TYPe GLITch",
             f"TRIGger:EVENt1:SOURce {self._src(source)}",
@@ -807,10 +831,10 @@ class MXO4(RsInstrument):
             f"TRIGger:EVENt1:GLITch:POLarity {polarity}",
         ])
 
-    # ---- 矮脉冲触发 ----
+    # ---- Runt trigger ----
     def configure_runt_trigger(self, source="C1", upper_level=0.5, lower_level=0.1,
                                polarity="POSitive"):
-        """矮脉冲 (Runt) 触发: 脉冲未能穿越上下电平之间。"""
+        """Runt trigger: the pulse does not cross the upper/lower level pair."""
         self.write_list([
             f"TRIGger:EVENt1:TYPe RUNT",
             f"TRIGger:EVENt1:SOURce {self._src(source)}",
@@ -819,10 +843,10 @@ class MXO4(RsInstrument):
             f"TRIGger:EVENt1:LEVel2:VALue {lower_level}",
         ])
 
-    # ---- 窗口触发 ----
+    # ---- Window trigger ----
     def configure_window_trigger(self, source="C1", upper_level=0.5, lower_level=-0.5,
                                  condition="WITHin"):
-        """窗口触发: 波形进入/离开电平窗口时触发。"""
+        """Window trigger: triggers when the signal enters/leaves the level window."""
         self.write_list([
             f"TRIGger:EVENt1:TYPe WINdow",
             f"TRIGger:EVENt1:SOURce {self._src(source)}",
@@ -831,10 +855,10 @@ class MXO4(RsInstrument):
             f"TRIGger:EVENt1:LEVel2:VALue {lower_level}",
         ])
 
-    # ---- 超时触发 ----
+    # ---- Timeout trigger ----
     def configure_timeout_trigger(self, source="C1", level=0.0, timeout=1e-6,
                                   condition="LONGer"):
-        """超时触发: 电平保持时间超过/短于 ``timeout`` (s) 时触发。"""
+        """Timeout trigger: triggers when the level duration is longer/shorter than ``timeout`` (s)."""
         self.write_list([
             f"TRIGger:EVENt1:TYPe TIMeout",
             f"TRIGger:EVENt1:SOURce {self._src(source)}",
@@ -843,15 +867,15 @@ class MXO4(RsInstrument):
             f"TRIGger:EVENt1:TIMeout:RANGe {timeout}",
         ])
 
-    # ---- 码型触发 ----
+    # ---- Pattern trigger ----
     def configure_pattern_trigger(self, sources=None, levels=None,
                                   pattern="1111"):
         """
-        码型触发 (需要逻辑/MSO 选件)。
+        Pattern trigger (requires the logic / MSO option).
 
-        :param sources: 信源列表, 例如 ['C1','C2'] 或 ['D0','D1']
-        :param levels:  对应电平列表
-        :param pattern: 码型字符串, 每个字符 0/1/X (不关心)
+        :param sources: list of sources, e.g. ['C1','C2'] or ['D0','D1']
+        :param levels:  matching list of levels
+        :param pattern: pattern string, every character is 0/1/X (don't care)
         """
         sources = sources or ["C1", "C2"]
         self.write_list([
@@ -864,18 +888,18 @@ class MXO4(RsInstrument):
         self.write(f"TRIGger:EVENt1:PATTern:CONDition TRUE")
         self.write(f"TRIGger:EVENt1:PATTern:PATTern {pattern}")
 
-    # ---- 串行总线触发 (协议触发) ----
+    # ---- Serial bus trigger (protocol trigger) ----
     def configure_serial_trigger(self, bus_number=1, bus_type=BusType.UART,
                                  source="SBUS1"):
         """
-        设置串行总线触发 (协议触发)。
+        Set up a serial bus trigger (protocol trigger).
 
-        对应 ``TRIGger:EVENt1:TYPe SERialbus``,
-        触发源 ``TRIGger:EVENt1:SOURce`` 为串行总线 (默认 ``SBUS1``)。
+        Corresponds to ``TRIGger:EVENt1:TYPe SERialbus``, the trigger source
+        ``TRIGger:EVENt1:SOURce`` is the serial bus (``SBUS1`` by default).
         """
         bt = bus_type.value if isinstance(bus_type, BusType) else bus_type
         if bus_number not in [1, 2, 3, 4]:
-            raise ValueError(f"bus_number 必须为 1~4, 当前: {bus_number}")
+            raise ValueError(f"bus_number must be 1~4, given: {bus_number}")
         elif bus_number == 1 and bus_type == BusType.UART:    
             self.write_list([
             f"TRIGger:EVENt{bus_number}:TYPE {'EDGE'}",
@@ -897,9 +921,10 @@ class MXO4(RsInstrument):
             f"TRIGger:SBHW:{bt}:TYPE {'STBT'} ",
         ])
         elif bus_number == 4 and bus_type == BusType.QSPI:
-            # QSPI 没有硬件串行总线触发 (TRIGger:SBHW:QSPI 不存在),
-            # 使用软件串行总线触发 TRIGger:SBSW:QSPI:*, 并需在
-            # A → Serial bus 多事件序列 (MEVents) 中触发。
+            # QSPI has no hardware serial bus trigger (there is no
+            # TRIGger:SBHW:QSPI); the software serial bus trigger
+            # TRIGger:SBSW:QSPI:* is used instead and has to be triggered in
+            # the A -> Serial bus multi event sequence (MEVents).
             self.write_list([
                 "TRIGger:MEVents:MODE SEQuence",
                 "TRIGger:MEVents:AEVents ASB",
@@ -908,11 +933,11 @@ class MXO4(RsInstrument):
                 "TRIGger:SBSW:QSPI:FRENable ON",
             ])
         else:
-            raise ValueError(f"不支持的总线配置: bus_number={bus_number}, bus_type={bus_type}")
+            raise ValueError(f"unsupported bus configuration: bus_number={bus_number}, bus_type={bus_type}")
 
     def configure_i2c_trigger(self, condition=None,
                               address=None, data=None, bus_number=2, source="SBUS2"):
-        """配置 I2C 串行总线触发条件。"""
+        """Configure an I2C serial bus trigger condition."""
         cond = condition.value if isinstance(condition, I2CTriggerCondition) else condition
         self.configure_serial_trigger(bus_number, BusType.I2C, source)
         if condition is not None:
@@ -932,7 +957,7 @@ class MXO4(RsInstrument):
   
     def configure_spi_trigger(self, condition="MOSI", pattern=None,
                               bus_number=3, source="SBUS3"):
-        """配置 SPI 串行总线触发条件 (MOSI/MISO 数据条件)。"""
+        """Configure an SPI serial bus trigger condition (MOSI/MISO data condition)."""
         self.configure_serial_trigger(bus_number, BusType.SPI, source)
         self.write(f"TRIGger:EVENt{bus_number}:SERialbus:SPI:CONDition {condition}")
         if pattern is not None:
@@ -941,19 +966,20 @@ class MXO4(RsInstrument):
     def configure_qspi_trigger(self, bus_number=4, source="SBUS4", clock_source="C1",
                                frame_enable=True, invert=False):
         """
-        配置 QSPI 软件串行总线触发 (A → Serial bus 序列)。
+        Configure the QSPI software serial bus trigger (A -> Serial bus sequence).
 
-        注意: QSPI 没有硬件串行总线触发 (``TRIGger:SBHW:QSPI`` 不存在),
-        使用软件触发 ``TRIGger:SBSW:QSPI:*``, 并需在 A → Serial bus
-        多事件序列 (MEVents) 中触发。
+        Note: QSPI has no hardware serial bus trigger (there is no
+        ``TRIGger:SBHW:QSPI``); the software trigger ``TRIGger:SBSW:QSPI:*`` is
+        used instead and has to be triggered in the A -> Serial bus multi event
+        sequence (MEVents).
 
-        :param bus_number:   QSPI 解码所在的串行总线编号 (1..4)
-        :param source:       串行总线源 (默认 SBUS4)
-        :param clock_source: QSPI 触发时钟 (A 事件 arming 源)。
-                             可为模拟通道 (如 'C1') 或数字通道 (如 'D0'),
-                             大小写不敏感 ('c1'/'d0' 均可)。
-        :param frame_enable: True 使能帧条件检查 (SBSW:QSPI:FRENable)
-        :param invert:       True 反相整体触发条件
+        :param bus_number:   number of the serial bus used by the QSPI decoder (1..4)
+        :param source:       serial bus source (SBUS4 by default)
+        :param clock_source: QSPI trigger clock (A event arming source).
+                             Can be an analog channel (e.g. 'C1') or a digital
+                             channel (e.g. 'D0'), case insensitive ('c1'/'d0').
+        :param frame_enable: True enables the frame condition check (SBSW:QSPI:FRENable)
+        :param invert:       True inverts the complete trigger condition
         """
         self.configure_serial_trigger(bus_number, BusType.QSPI, source)
         if clock_source is not None:
@@ -965,7 +991,7 @@ class MXO4(RsInstrument):
 
 
     def configure_uart_trigger(self, bus_number=1, source="SBUS1"):
-        """配置 UART 串行总线触发条件。"""
+        """Configure a UART serial bus trigger condition."""
         self.configure_serial_trigger(bus_number, BusType.UART, source)
         self.write_list([f"SBUS{bus_number}:ZCOupling {'ON'}",
                                   f"SBUS{bus_number}:RESult {'ON'}"
@@ -973,43 +999,45 @@ class MXO4(RsInstrument):
 
 
     # ------------------------------------------------------------------
-    # 协议分析 (串行总线解码)
+    # Protocol analysis (serial bus decoding)
     # ------------------------------------------------------------------
     def bus_state(self, bus_number=1, on=True):
-        """开关串行总线解码 ``SBUS<n>:STATe ON|OFF``。"""
+        """Switch the serial bus decoding on/off ``SBUS<n>:STATe ON|OFF``."""
         self.write(f"BUS{bus_number}:STATe {'ON' if on else 'OFF'}")
 
     def bus_result_table(self, bus_number=1, on=True):
         """
-        开关串行总线解码结果表 ``SBUS<n>:RESult ON|OFF``。
+        Switch the serial bus decode result table ``SBUS<n>:RESult ON|OFF``.
 
-        MXO4 屏幕下方的结果区会同时显示解码结果表与自动测量结果表;
-        关闭解码表 (OFF) 后即可露出测量结果表 (RMS/FREQuency/AMPLitude 等),
-        便于截屏保存测量界面。
+        The result area at the bottom of the MXO4 screen shows the decode result
+        table and the automatic measurement result table at the same time;
+        switching the decode table off (OFF) reveals the measurement result
+        table (RMS/FREQuency/AMPLitude, ...), which makes it easier to save a
+        screenshot of the measurement screen.
         """
         self.write(f"SBUS{bus_number}:RESult {'ON' if on else 'OFF'}")
 
     def bus_type(self, bus_number=1, bus_type=BusType.I2C):
-        """设置串行总线协议类型 ``SBUS<n>:TYPE``。"""
+        """Set the serial bus protocol type ``SBUS<n>:TYPE``."""
         bt = bus_type.value if isinstance(bus_type, BusType) else bus_type
         self.write(f"SBUS{bus_number}:TYPE {bt}")
 
     def bus_label(self, bus_number=1, label=""):
-        """串行总线标签 ``SBUS<n>:LABel '<str>'``。"""
+        """Serial bus label ``SBUS<n>:LABel '<str>'``."""
         self.write(f"SBUS{bus_number}:LABel '{label}'")
 
     def bus_threshold(self, bus_number=1, level=1.65):
-        """逻辑电平阈值 ``SBUS<n>:THReshold <NR3>`` (V)。"""
+        """Logic level threshold ``SBUS<n>:THReshold <NR3>`` (V)."""
         self.write(f"SBUS{bus_number}:THReshold {level}")
 
     def configure_i2c_decode(self, bus_number=1, scl="C1", sda="C2"):
         """
-        配置 I2C 解码。
+        Configure the I2C decoder.
 
-        :param bus_number:    串行总线编号 (1..4)
-        :param scl:           SCL 时钟信源 (C1..C4 / D0..D15)
-        :param sda:           SDA 数据信源
-        :param address_mode:  地址模式 7BIT / 10BIT
+        :param bus_number:   serial bus number (1..4)
+        :param scl:          SCL clock source (C1..C4 / D0..D15)
+        :param sda:          SDA data source
+        :param address_mode: address mode 7BIT / 10BIT
         """
         self.write_list([
             f"SBUS{bus_number}:TYPE I2C",
@@ -1025,12 +1053,12 @@ class MXO4(RsInstrument):
                              miso="C3", ss="C4", polarity=SPIPolarity.IDLE_LOW,
                              bit_order=UARTBitOrder.MSB_FIRST, ss_active="LOW"):
         """
-        配置 SPI 解码。
+        Configure the SPI decoder.
 
-        :param sclk: SCLK 时钟信源
-        :param mosi: MOSI 数据信源 (仅主机模式)
-        :param miso: MISO 数据信源 (仅从机模式)
-        :param ss:   片选信源 (可 'NONE')
+        :param sclk: SCLK clock source
+        :param mosi: MOSI data source (master mode only)
+        :param miso: MISO data source (slave mode only)
+        :param ss:   chip select source (can be 'NONE')
         """
         pol = polarity.value if isinstance(polarity, SPIPolarity) else polarity
         bo = bit_order.value if isinstance(bit_order, UARTBitOrder) else bit_order
@@ -1051,26 +1079,27 @@ class MXO4(RsInstrument):
                               sclk_polarity="RISing", cs_polarity="ACTLow",
                               instruction="QUAD", opcodes=None, result_table=True):
         """
-        配置 QSPI (Quad SPI) 解码。
+        Configure the QSPI (Quad SPI) decoder.
 
-        对应 ``SBUS<n>:TYPE QSPI`` 与 ``SBUS<n>:QSPI:*`` 子树:
-          * 时钟 ``QSPI:SCLK:SOURce``, 片选 ``QSPI:CSEL:SOURce``
-          * 数据线 ``QSPI:IOZero / IOONe / IOTWo / IOTHree:SOURce`` (IO0~IO3)
-          * QSPI 由 opcode 指令表驱动, 每个 opcode 可单独设置地址/数据通道数
-            (SINGle / DUAL / QUAD)、DDR、dummy cycles、地址字节数等
+        Corresponds to ``SBUS<n>:TYPE QSPI`` and the ``SBUS<n>:QSPI:*`` subtree:
+          * clock ``QSPI:SCLK:SOURce``, chip select ``QSPI:CSEL:SOURce``
+          * data lines ``QSPI:IOZero / IOONe / IOTWo / IOTHree:SOURce`` (IO0~IO3)
+          * QSPI is driven by an opcode instruction table; each opcode can set
+            the number of address/data lanes (SINGle / DUAL / QUAD), DDR,
+            dummy cycles, number of address bytes, etc.
 
-        :param bus_number:     串行总线编号 (1..4)
-        :param sclk:           SCLK 时钟信源
-        :param cs:             CS (片选) 信源
-        :param io0..io3:       IO0~IO3 数据线信源
-        :param sclk_polarity:  时钟极性 RISing / FALLing
-        :param cs_polarity:    片选有效电平 ACTLow / ACTHigh
-        :param instruction:    指令模式 SINGle / DUAL / QUAD
-        :param opcodes:        opcode 表 (list[dict]), 每个元素可含:
-                               code(0~255), ddr(bool 或 ON/OFF), adbytes(0~4),
+        :param bus_number:     serial bus number (1..4)
+        :param sclk:           SCLK clock source
+        :param cs:             CS (chip select) source
+        :param io0..io3:       IO0~IO3 data line sources
+        :param sclk_polarity:  clock polarity RISing / FALLing
+        :param cs_polarity:    chip select active level ACTLow / ACTHigh
+        :param instruction:    instruction mode SINGle / DUAL / QUAD
+        :param opcodes:        opcode table (list[dict]); every element may hold
+                               code(0~255), ddr(bool or ON/OFF), adbytes(0~4),
                                adlanes/dtlanes(SINGle|DUAL|QUAD),
-                               dmcycles(0~255), data(bool 或 ON/OFF)
-        :param result_table:   True 显示解码结果表
+                               dmcycles(0~255), data(bool or ON/OFF)
+        :param result_table:   True shows the decode result table
         """
         def _on_off(v):
             if isinstance(v, bool):
@@ -1115,15 +1144,15 @@ class MXO4(RsInstrument):
                               stop_bits=STOPBit.ONE_BIT, bit_order=UARTBitOrder.LSB_FIRST,
                               idle=UARTPOLarity.IDLHigh):
         """
-        配置 UART (RS-232/422/485) 解码。
+        Configure the UART (RS-232/422/485) decoder.
 
-        :param rx:        RX 数据信源
-        :param tx:        TX 数据信源 (可 'NONE')
-        :param baud:      波特率
-        :param data_bits: 数据位 (7/8/9)
-        :param parity:    校验位
-        :param stop_bits: 停止位 (1/1.5/2)
-        :param idle:      空闲电平 IDLEHIGH / IDLELOW
+        :param rx:        RX data source
+        :param tx:        TX data source (can be 'NONE')
+        :param baud:      baud rate
+        :param data_bits: number of data bits (7/8/9)
+        :param parity:    parity
+        :param stop_bits: stop bits (1/1.5/2)
+        :param idle:      idle level IDLEHIGH / IDLELOW
         """
         par = parity.value if isinstance(parity, UARTParity) else parity
         bo = bit_order.value if isinstance(bit_order, UARTBitOrder) else bit_order
@@ -1144,91 +1173,93 @@ class MXO4(RsInstrument):
 
     def get_decoded_data(self, bus_number=1):
         """
-        读取串行总线解码结果 ``SBUS<n>:RESult?``, 返回字符串。
+        Read the serial bus decode result ``SBUS<n>:RESult?``, returns a string.
 
-        返回内容为按帧列出的解码数据 (格式取决于总线与固件版本),
-        可自行按行/逗号解析。另可参考 ``SBUS<n>:RESult:FCOunt?`` 获取帧数。  
+        The answer holds the decoded data listed per frame (the format depends
+        on the bus and the firmware version), it can be parsed line by line or
+        by comma. ``SBUS<n>:RESult:FCOunt?`` gives the number of frames.  
         """
         return self.query(f"SBUS{bus_number}:RESult?")
 
     def get_decoded_frame_count(self, bus_number=1):
-        """查询解码出的帧数量 ``SBUS<n>:RESult:FCOunt?``。"""
+        """Query the number of decoded frames ``SBUS<n>:RESult:FCOunt?``."""
         try:
             return int(float(self.query(f"SBUS{bus_number}:RESult:FCOunt?")))
         except Exception:
-            # 部分固件使用 SBUS<n>:FCOunt?
+            # some firmware revisions use SBUS<n>:FCOunt?
             return int(float(self.query(f"SBUS{bus_number}:FCOunt?")))
 
     # ------------------------------------------------------------------
-    # 数字 logic 解码 (MSO 数字通道 D0~D15 与逻辑组 PBUS/Logic1~4)
+    # Digital logic decoding (MSO digital channels D0~D15 and logic groups PBUS/Logic1~4)
     # ------------------------------------------------------------------
     def digital_channel_state(self, digital, on=True):
-        """开关数字通道 ``DIGital<n>:STATe ON|OFF`` (n=0..15, 即 D0~D15)。"""
+        """Switch a digital channel on/off ``DIGital<n>:STATe ON|OFF`` (n=0..15, i.e. D0~D15)."""
         self.write(f"DIGital{int(digital)}:STATe {'ON' if on else 'OFF'}")
 
     def digital_probe_enable(self, probe=1, digital=0, on=True):
         """
-        启用/关闭数字模块 (MSO 逻辑探头 pod) ``DIGital<n>:PROBe<m>:ENABle``。
+        Enable/disable a digital channel of the MSO logic probe pod
+        ``DIGital<n>:PROBe<m>:ENABle``.
 
-        :param probe:   pod 编号 (1..2)
-        :param digital: 数字通道号 (0..15)
+        :param probe:   pod number (1..2)
+        :param digital: digital channel number (0..15)
         """
         self.write(f"DIGital{int(digital)}:PROBe{int(probe)}:ENABle {'ON' if on else 'OFF'}")
 
     def digital_channel_threshold(self, digital, volts=1.65):
-        """设置数字通道阈值 ``DIGital<n>:THReshold <NR3>`` (V, 作用于所属逻辑组)。"""
+        """Set the digital channel threshold ``DIGital<n>:THReshold <NR3>`` (V, affects the whole logic group)."""
         self.write(f"DIGital{int(digital)}:THReshold {volts}")
 
     def digital_channel_technology(self, digital, technology="V165"):
-        """设置数字通道阈值技术预设 ``DIGital<n>:TECHnology`` (V165/V25/V125/V09/V15/VM13/V38/V20/V0/MANual)。"""
+        """Set the digital channel threshold technology preset ``DIGital<n>:TECHnology`` (V165/V25/V125/V09/V15/VM13/V38/V20/V0/MANual)."""
         self.write(f"DIGital{int(digital)}:TECHnology {technology}")
 
     def digital_channel_hysteresis(self, digital, hysteresis="NORMal"):
-        """设置数字通道滞回 ``DIGital<n>:HYSTeresis`` (MAXimum/ROBust/NORMal)。"""
+        """Set the digital channel hysteresis ``DIGital<n>:HYSTeresis`` (MAXimum/ROBust/NORMal)."""
         self.write(f"DIGital{int(digital)}:HYSTeresis {hysteresis}")
 
     def digital_channel_threshold_coupling(self, digital, on=True):
-        """阈值/滞回耦合 ``DIGital<n>:THCoupling ON|OFF``。"""
+        """Threshold/hysteresis coupling ``DIGital<n>:THCoupling ON|OFF``."""
         self.write(f"DIGital{int(digital)}:THCoupling {'ON' if on else 'OFF'}")
 
     def pbus_state(self, pbus=1, on=True):
-        """开关逻辑组 (并行总线) ``PBUS<n>:STATe ON|OFF`` (n=1..4)。"""
+        """Switch a logic group (parallel bus) on/off ``PBUS<n>:STATe ON|OFF`` (n=1..4)."""
         self.write(f"PBUS{int(pbus)}:STATe {'ON' if on else 'OFF'}")
 
     def pbus_bit_state(self, pbus=1, bit=0, on=True):
-        """使能逻辑组中的数字通道 BIT ``PBUS<n>:BIT<m>:STATe ON|OFF`` (m=0..15)。"""
+        """Enable the digital channel BIT of a logic group ``PBUS<n>:BIT<m>:STATe ON|OFF`` (m=0..15)."""
         self.write(f"PBUS{int(pbus)}:BIT{int(bit)}:STATe {'ON' if on else 'OFF'}")
 
     def pbus_bit_label(self, pbus=1, bit=0, label=""):
-        """设置逻辑组中某 BIT 的名称 ``PBUS<n>:BIT<m>:LABel '<label>'``。"""
+        """Set the name of one BIT in a logic group ``PBUS<n>:BIT<m>:LABel '<label>'``."""
         self.write(f"PBUS{int(pbus)}:BIT{int(bit)}:LABel '{label}'")
 
     def pbus_clear(self, pbus=1):
-        """清空逻辑组中的全部通道 ``PBUS<n>:CLEar``。"""
+        """Clear all channels of a logic group ``PBUS<n>:CLEar``."""
         self.write(f"PBUS{int(pbus)}:CLEar")
 
     def pbus_decode_table(self, pbus=1, on=True):
-        """开关逻辑组解码结果表 ``PBUS<n>:DECTable:SHOW ON|OFF`` (仅时钟总线有效)。"""
+        """Switch the logic group decode result table ``PBUS<n>:DECTable:SHOW ON|OFF`` (clocked bus only)."""
         self.write(f"PBUS{int(pbus)}:DECTable:SHOW {'ON' if on else 'OFF'}")
 
     def pbus_threshold(self, pbus=1, index=1, volts=1.65):
-        """设置逻辑组阈值 ``PBUS<n>:THReshold<m> <NR3>`` (V, m=1..4)。"""
+        """Set a logic group threshold ``PBUS<n>:THReshold<m> <NR3>`` (V, m=1..4)."""
         self.write(f"PBUS{int(pbus)}:THReshold{int(index)} {volts}")
 
     def pbus_technology(self, pbus=1, technology="V165"):
-        """设置逻辑组阈值技术预设 ``PBUS<n>:TECHnology``。"""
+        """Set the logic group threshold technology preset ``PBUS<n>:TECHnology``."""
         self.write(f"PBUS{int(pbus)}:TECHnology {technology}")
 
     def pbus_hysteresis(self, pbus=1, index=1, hysteresis="NORMal"):
-        """设置逻辑组滞回 ``PBUS<n>:HYSTeresis<m>`` (m=1..4)。"""
+        """Set a logic group hysteresis ``PBUS<n>:HYSTeresis<m>`` (m=1..4)."""
         self.write(f"PBUS{int(pbus)}:HYSTeresis{int(index)} {hysteresis}")
 
     def pbus_threshold_coupling(self, pbus=1, on=True):
-        """逻辑组阈值/滞回耦合 ``PBUS<n>:THCoupling ON|OFF``。"""
+        """Logic group threshold/hysteresis coupling ``PBUS<n>:THCoupling ON|OFF``."""
         self.write(f"PBUS{int(pbus)}:THCoupling {'ON' if on else 'OFF'}")
 
     def pbus_clock(self, pbus=1, source="D0", slope="POSitive", on=True):
-        """配置逻辑组时钟总线 ``PBUS<n>:CLON / CLOCk / CLSLope``。"""
+        """Configure the logic group clocked bus ``PBUS<n>:CLON / CLOCk / CLSLope``."""
         self.write(f"PBUS{int(pbus)}:CLON {'ON' if on else 'OFF'}")
         if source is not None:
             self.write(f"PBUS{int(pbus)}:CLOCk {self._src(source)}")
@@ -1236,12 +1267,12 @@ class MXO4(RsInstrument):
             self.write(f"PBUS{int(pbus)}:CLSLope {slope}")
 
     def pbus_display(self, pbus=1, show_bus=True, show_digital=True):
-        """逻辑组显示选项 ``PBUS<n>:DISPlay:SHBU / SHDI``。"""
+        """Logic group display options ``PBUS<n>:DISPlay:SHBU / SHDI``."""
         self.write(f"PBUS{int(pbus)}:DISPlay:SHBU {'ON' if show_bus else 'OFF'}")
         self.write(f"PBUS{int(pbus)}:DISPlay:SHDI {'ON' if show_digital else 'OFF'}")
 
     def get_pbus_data(self, pbus=1):
-        """读取逻辑组解码数据 ``PBUS<n>:DATA:VALUES?``。"""
+        """Read the logic group decoded data ``PBUS<n>:DATA:VALUES?``."""
         return self.query(f"PBUS{int(pbus)}:DATA:VALUES?")
 
     def configure_logic_decode(self, pbus=1, bits=None, threshold=1.65,
@@ -1250,20 +1281,22 @@ class MXO4(RsInstrument):
                                clock_slope="POSitive", decode_table=False,
                                show_bus=True, show_digital=True, enable=True):
         """
-        一键配置数字逻辑组 (并行总线) 解码 (PBUS<n>, 对应 Logic1~Logic4)。
+        Configure a digital logic group (parallel bus) decoder in one go
+        (PBUS<n>, corresponding to Logic1~Logic4).
 
-        :param pbus:         逻辑组编号 (1..4)
-        :param bits:         使能的数字通道列表, 例如 [0,1,2,3] (即 D0~D3);
-                             元素也可为 (bit, label) 元组
-        :param threshold:    阈值电压 (V)
-        :param technology:   阈值技术预设 (V165/V25/V125/V09/V15/VM13/V38/V20/V0/MANual)
-        :param hysteresis:   滞回 (MAXimum/ROBust/NORMal)
-        :param clocked:      True 使用一个通道作为总线时钟
-        :param clock_source: 时钟通道 (D0..D15)
-        :param clock_slope:  时钟边沿 (POSitive/NEGative/EITHer)
-        :param decode_table: True 显示解码结果表 (仅时钟总线有效)
-        :param show_bus/show_digital: 显示总线信号 / 数字通道
-        :param enable:       True 启用该逻辑组
+        :param pbus:         logic group number (1..4)
+        :param bits:         list of digital channels to enable, e.g. [0,1,2,3]
+                             (i.e. D0~D3); elements can also be (bit, label) tuples
+        :param threshold:    threshold voltage (V)
+        :param technology:   threshold technology preset
+                             (V165/V25/V125/V09/V15/VM13/V38/V20/V0/MANual)
+        :param hysteresis:   hysteresis (MAXimum/ROBust/NORMal)
+        :param clocked:      True uses one channel as the bus clock
+        :param clock_source: clock channel (D0..D15)
+        :param clock_slope:  clock edge (POSitive/NEGative/EITHer)
+        :param decode_table: True shows the decode result table (clocked bus only)
+        :param show_bus/show_digital: show the bus signal / the digital channels
+        :param enable:       True enables this logic group
         """
         bits = bits or []
         # self.pbus_state(pbus, enable)
@@ -1286,19 +1319,20 @@ class MXO4(RsInstrument):
         self.pbus_state(pbus, enable)
 
     # ------------------------------------------------------------------
-    # 自动测量 (通用)
+    # Automatic measurements (generic)
     # ------------------------------------------------------------------
     def configure_measurement(self, measure_index=1, source="C1", main="AMPlitude",
                               category=None, additional=None, enable=True):
         """
-        配置一个自动测量项 (MEASurement<n>)。
+        Configure one automatic measurement item (MEASurement<n>).
 
-        :param measure_index: 测量编号 (1..N)
-        :param source:        测量源 (C1..C4 / EYE1 / 数学信号等)
-        :param main:          主测量类型, 例如 AMPlitude / FREQuency / EHEight
-        :param category:      测量类别, 例如 EYEJitter
-        :param additional:    附加测量列表, 元素可为 str 或 (name, on) 元组
-        :param enable:        True 启用测量
+        :param measure_index: measurement number (1..N)
+        :param source:        measurement source (C1..C4 / EYE1 / math signal, ...)
+        :param main:          main measurement type, e.g. AMPlitude / FREQuency / EHEight
+        :param category:      measurement category, e.g. EYEJitter
+        :param additional:    list of additional measurements, elements can be a
+                              str or a (name, on) tuple
+        :param enable:        True enables the measurement
         """
         if category is not None:
             self.write(f"MEASurement{measure_index}:CATegory {category}")
@@ -1316,29 +1350,30 @@ class MXO4(RsInstrument):
 
     def get_measurement_result(self, measure_index=1, result_index=1):
         """
-        读取测量结果。
+        Read a measurement result.
 
-        :param measure_index: 测量编号
-        :param result_index:  结果序号 (1 为主测量, >1 为附加测量)
-        :return: 测量值字符串
+        :param measure_index: measurement number
+        :param result_index:  result index (1 is the main measurement, >1 the
+                              additional measurements)
+        :return: the measurement value as a string
         """
         if result_index <= 1:
             return self.query(f"MEASurement{measure_index}:RESult:ACTual?")
         return self.query(f"MEASurement{measure_index}:RESult{result_index}:ACTual?")
 
     # ------------------------------------------------------------------
-    # 上升沿 / 幅值 专用测量辅助 (基于 MEASurement)
+    # Rise time / amplitude measurement helpers (based on MEASurement)
     # ------------------------------------------------------------------
     def configure_rise_time_measurement(self, measure_index=1, source="C1",
                                         enable=True):
         """
-        配置上升沿时间自动测量 ``MEASurement<n>:MAIN RTIMe``。
+        Configure the rise time automatic measurement ``MEASurement<n>:MAIN RTIMe``.
 
-        注意: MXO4 的上升沿时间参数为 ``RTIMe`` (而非 ``RISEtime``)。
+        Note: the MXO4 rise time parameter is ``RTIMe`` (not ``RISEtime``).
 
-        :param measure_index: 测量编号 (1..16)
-        :param source:        测量源 (C1..C4 / D0..D15 / 数学信号等)
-        :param enable:        True 启用
+        :param measure_index: measurement number (1..16)
+        :param source:        measurement source (C1..C4 / D0..D15 / math signal, ...)
+        :param enable:        True enables the measurement
         """
         self.write(f"MEASurement{measure_index}:SOURce {self._src(source)}")
         self.write(f"MEASurement{measure_index}:MAIN RTIMe")
@@ -1347,7 +1382,7 @@ class MXO4(RsInstrument):
     def configure_amplitude_measurement(self, measure_index=1, source="C1",
                                         enable=True):
         """
-        配置幅值自动测量 ``MEASurement<n>:MAIN AMPLitude``。
+        Configure the amplitude automatic measurement ``MEASurement<n>:MAIN AMPLitude``.
         """
         self.write(f"MEASurement{measure_index}:SOURce {self._src(source)}")
         self.write(f"MEASurement{measure_index}:MAIN AMPLitude")
@@ -1355,9 +1390,10 @@ class MXO4(RsInstrument):
 
     def get_measurement_value(self, measure_index=1):
         """
-        读取测量结果并尽量转换为 float; 转换失败时返回原始字符串。
+        Read a measurement result and convert it to float when possible;
+        the raw string is returned when the conversion fails.
 
-        对应 ``MEASurement<n>:RESult:ACTual?``。
+        Corresponds to ``MEASurement<n>:RESult:ACTual?``.
         """
         raw = self.query(f"MEASurement{measure_index}:RESult:ACTual?")
         try:
@@ -1366,30 +1402,32 @@ class MXO4(RsInstrument):
             return raw
 
     # ------------------------------------------------------------------
-    # 光标测量 (Cursor)
+    # Cursor measurements (Cursor)
     # ------------------------------------------------------------------
     def cursor_state(self, cursor=1, on=True):
-        """开关光标显示 ``CURSor<n>:STATe ON|OFF``。"""
+        """Switch the cursor display on/off ``CURSor<n>:STATe ON|OFF``."""
         self.write(f"CURSor{cursor}:STATe {'ON' if on else 'OFF'}")
 
     def cursor_all_off(self):
-        """关闭所有光标 ``CURSor:AOFF`` (无后缀)。"""
+        """Switch all cursors off ``CURSor:AOFF`` (no suffix)."""
         self.write("CURSor:AOFF")
 
     def cursor_function(self, cursor=1, function=CursorFunction.PAIRED):
-        """设置光标类型 ``CURSor<n>:FUNCtion`` (VERTical / HORizontal / PAIRed)。"""
+        """Set the cursor type ``CURSor<n>:FUNCtion`` (VERTical / HORizontal / PAIRed)."""
         val = function.value if isinstance(function, CursorFunction) else function
         self.write(f"CURSor{cursor}:FUNCtion {val}")
 
     def cursor_source(self, cursor=1, source="C1"):
-        """设置光标信源 ``CURSor<n>:SOURce``。"""
+        """Set the cursor source ``CURSor<n>:SOURce``."""
         self.write(f"CURSor{cursor}:SOURce {self._src(source)}")
 
     def cursor_positions(self, cursor=1, x1=None, x2=None, y1=None, y2=None):
         """
-        设置光标位置 ``CURSor<n>:X1Position / X2Position / Y1Position / Y2Position``。
+        Set the cursor positions
+        ``CURSor<n>:X1Position / X2Position / Y1Position / Y2Position``.
 
-        :param x1/x2: 垂直光标位置 (s); y1/y2: 水平光标位置 (V); None 表示不修改
+        :param x1/x2: vertical cursor positions (s); y1/y2: horizontal cursor
+                      positions (V); None keeps the current value
         """
         if x1 is not None:
             self.write(f"CURSor{cursor}:X1Position {x1}")
@@ -1401,44 +1439,44 @@ class MXO4(RsInstrument):
             self.write(f"CURSor{cursor}:Y2Position {y2}")
 
     def cursor_tracking(self, cursor=1, on=True):
-        """设置光标跟踪 ``CURSor<n>:TRACking:STATe ON|OFF``。"""
+        """Set the cursor tracking ``CURSor<n>:TRACking:STATe ON|OFF``."""
         self.write(f"CURSor{cursor}:TRACking:STATe {'ON' if on else 'OFF'}")
 
     def cursor_display_values(self, cursor=1, on=True):
-        """是否显示光标数值标签 ``CURSor<n>:DISPlay:VALues ON|OFF``。"""
+        """Whether the cursor value labels are shown ``CURSor<n>:DISPlay:VALues ON|OFF``."""
         self.write(f"CURSor{cursor}:DISPlay:VALues {'ON' if on else 'OFF'}")
 
     def cursor_label_show(self, cursor=1, on=True):
-        """是否显示光标标签 (名称) ``CURSor<n>:LABel ON|OFF``。"""
+        """Whether the cursor labels (names) are shown ``CURSor<n>:LABel ON|OFF``."""
         self.write(f"CURSor{cursor}:LABel {'ON' if on else 'OFF'}")
 
     def cursor_vertical_label(self, cursor=1, line=1, label=""):
         """
-        设置垂直光标线名称 ``CURSor<n>:VERTical<m>:LABel '<label>'``。
+        Set the name of a vertical cursor line ``CURSor<n>:VERTical<m>:LABel '<label>'``.
 
-        :param cursor: 光标组编号 (1..2)
-        :param line:   垂直光标线编号 (1..2)
-        :param label:  名称文本 (请勿包含单引号)
+        :param cursor: cursor group number (1..2)
+        :param line:   vertical cursor line number (1..2)
+        :param label:  name text (do not use single quotes inside)
         """
         self.write(f"CURSor{cursor}:VERTical{int(line)}:LABel '{label}'")
 
     def cursor_horizontal_label(self, cursor=1, line=1, label=""):
         """
-        设置水平光标线名称 ``CURSor<n>:HORizontal<m>:LABel '<label>'``。
+        Set the name of a horizontal cursor line ``CURSor<n>:HORizontal<m>:LABel '<label>'``.
 
-        :param cursor: 光标组编号 (1..2)
-        :param line:   水平光标线编号 (1..2)
-        :param label:  名称文本 (请勿包含单引号)
+        :param cursor: cursor group number (1..2)
+        :param line:   horizontal cursor line number (1..2)
+        :param label:  name text (do not use single quotes inside)
         """
         self.write(f"CURSor{cursor}:HORizontal{int(line)}:LABel '{label}'")
 
     def set_cursor_labels(self, cursor=1, v1=None, v2=None, h1=None, h2=None):
         """
-        一键设置光标四条线的名称 (None 表示不修改)。
+        Set the names of all four cursor lines in one go (None keeps the name).
 
-        :param v1/v2: 垂直光标线 1/2 的名称
-        :param h1/h2: 水平光标线 1/2 的名称
-        :return: self, 便于链式调用
+        :param v1/v2: names of vertical cursor lines 1/2
+        :param h1/h2: names of horizontal cursor lines 1/2
+        :return: self, allows chaining
         """
         if v1 is not None:
             self.cursor_vertical_label(cursor, 1, v1)
@@ -1451,28 +1489,30 @@ class MXO4(RsInstrument):
         return self
 
     def get_cursor_delta_x(self, cursor=1):
-        """读取垂直光标差值 ΔX (时间, s) ``CURSor<n>:XDELta?``。"""
+        """Read the vertical cursor difference delta X (time, s) ``CURSor<n>:XDELta?``."""
         return float(self.query(f"CURSor{cursor}:XDELta?"))
 
     def get_cursor_delta_y(self, cursor=1):
-        """读取水平光标差值 ΔY (幅度, V) ``CURSor<n>:YDELta?``。"""
+        """Read the horizontal cursor difference delta Y (amplitude, V) ``CURSor<n>:YDELta?``."""
         return float(self.query(f"CURSor{cursor}:YDELta?"))
 
     def configure_cursor(self, cursor=1, function=CursorFunction.PAIRED,
                          source="C1", x1=None, x2=None, y1=None, y2=None,
                          show=True, show_values=True, tracking=False):
         """
-        一键配置光标: 类型 / 信源 / 位置 / 显示。
+        Configure a cursor in one go: type / source / positions / display.
 
-        :param cursor:      光标组编号 (1..2)
-        :param function:    CursorFunction.VERTICAL (测时间) / HORIZONTAL (测幅度) / PAIRED (同时)
-        :param source:      光标信源 (C1..C4 等)
-        :param x1/x2:       垂直光标位置 (s)
-        :param y1/y2:       水平光标位置 (V)
-        :param show:        True 显示光标 (CURSor<n>:STATe ON); False 只配置不显示
-        :param show_values: True 显示光标数值标签
-        :param tracking:    是否跟踪波形
-        :return: self, 便于链式调用
+        :param cursor:      cursor group number (1..2)
+        :param function:    CursorFunction.VERTICAL (measure time) /
+                            HORIZONTAL (measure amplitude) / PAIRED (both)
+        :param source:      cursor source (C1..C4, ...)
+        :param x1/x2:       vertical cursor positions (s)
+        :param y1/y2:       horizontal cursor positions (V)
+        :param show:        True shows the cursors (CURSor<n>:STATe ON);
+                            False only configures them
+        :param show_values: True shows the cursor value labels
+        :param tracking:    whether the cursors track the waveform
+        :return: self, allows chaining
         """
         self.cursor_function(cursor, function)
         self.cursor_source(cursor, source)
@@ -1483,21 +1523,22 @@ class MXO4(RsInstrument):
         return self
 
     # ------------------------------------------------------------------
-    # 建立时间 / 保持时间测量 (Setup / Hold Time)
+    # Setup / hold time measurements
     # ------------------------------------------------------------------
     def configure_setup_time(self, measure_index=1, data_source="C1",
                              clock_source="C2", enable=True):
         """
-        配置建立时间 (Setup Time) 自动测量。
+        Configure the setup time automatic measurement.
 
-        建立时间测量需要两个信源:
-          * 数据信源 ``data_source``  -> ``MEASurement<n>:SOURce``
-          * 时钟信源 ``clock_source`` -> ``MEASurement<n>:SSRC`` (第二信源)
+        A setup time measurement needs two sources:
+          * data source ``data_source``   -> ``MEASurement<n>:SOURce``
+          * clock source ``clock_source`` -> ``MEASurement<n>:SSRC`` (second source)
 
-        :param measure_index: 测量编号 (1..N)
-        :param data_source:   数据信源 (C1..C4 / D0..D15 等)
-        :param clock_source:  时钟 (参考) 信源, 建立时间以该信源的边沿为基准
-        :param enable:        True 启用测量
+        :param measure_index: measurement number (1..N)
+        :param data_source:   data source (C1..C4 / D0..D15, ...)
+        :param clock_source:  clock (reference) source; the setup time is
+                              referenced to the edge of this source
+        :param enable:        True enables the measurement
         """
         self.write(f"MEASurement{measure_index}:MAIN SETup")
         self.write(f"MEASurement{measure_index}:SOURce {self._src(data_source)}")
@@ -1507,16 +1548,17 @@ class MXO4(RsInstrument):
     def configure_hold_time(self, measure_index=1, data_source="C1",
                             clock_source="C2", enable=True):
         """
-        配置保持时间 (Hold Time) 自动测量。
+        Configure the hold time automatic measurement.
 
-        保持时间测量需要两个信源:
-          * 数据信源 ``data_source``  -> ``MEASurement<n>:SOURce``
-          * 时钟信源 ``clock_source`` -> ``MEASurement<n>:SSRC`` (第二信源)
+        A hold time measurement needs two sources:
+          * data source ``data_source``   -> ``MEASurement<n>:SOURce``
+          * clock source ``clock_source`` -> ``MEASurement<n>:SSRC`` (second source)
 
-        :param measure_index: 测量编号 (1..N)
-        :param data_source:   数据信源 (C1..C4 / D0..D15 等)
-        :param clock_source:  时钟 (参考) 信源, 保持时间以该信源的边沿为基准
-        :param enable:        True 启用测量
+        :param measure_index: measurement number (1..N)
+        :param data_source:   data source (C1..C4 / D0..D15, ...)
+        :param clock_source:  clock (reference) source; the hold time is
+                              referenced to the edge of this source
+        :param enable:        True enables the measurement
         """
         self.write(f"MEASurement{measure_index}:MAIN HOLD")
         self.write(f"MEASurement{measure_index}:SOURce {self._src(data_source)}")
@@ -1526,17 +1568,18 @@ class MXO4(RsInstrument):
     def configure_setup_hold(self, measure_index=1, data_source="C1",
                              clock_source="C2", enable=True):
         """
-        同时配置建立时间 (SETup) 与保持时间 (HOLD) 两项测量。
+        Configure the setup time (SETup) and hold time (HOLD) measurement together.
 
-        使用连续的两个测量编号:
-          * ``measure_index``      -> 建立时间 ``SETup``
-          * ``measure_index + 1``  -> 保持时间 ``HOLD``
+        Two consecutive measurement numbers are used:
+          * ``measure_index``      -> setup time ``SETup``
+          * ``measure_index + 1``  -> hold time ``HOLD``
 
-        :param measure_index: 起始测量编号 (1..N)
-        :param data_source:   数据信源
-        :param clock_source:  时钟 (参考) 信源
-        :param enable:        True 启用测量
-        :return: (setup_index, hold_index) 两项测量分别占用的测量编号
+        :param measure_index: first measurement number (1..N)
+        :param data_source:   data source
+        :param clock_source:  clock (reference) source
+        :param enable:        True enables the measurements
+        :return: (setup_index, hold_index), the measurement numbers used by the
+                 two measurements
         """
         self.configure_setup_time(measure_index, data_source, clock_source, enable)
         hold_index = measure_index + 1
@@ -1545,13 +1588,15 @@ class MXO4(RsInstrument):
 
     def get_setup_hold_results(self, measure_index=1):
         """
-        读取建立时间与保持时间测量结果 (``RESult:ACTual?``, 单位: 秒)。
+        Read the setup time and hold time measurement results
+        (``RESult:ACTual?``, unit: seconds).
 
-        需先调用 ``configure_setup_hold`` (或分别调用 ``configure_setup_time`` /
-        ``configure_hold_time``), 并保证示波器已完成采集。
+        ``configure_setup_hold`` has to be called first (or ``configure_setup_time`` /
+        ``configure_hold_time`` separately) and the scope must have finished the
+        acquisition.
 
-        :param measure_index: 建立时间测量所占用的测量编号
-        :return: dict, 键为 'setup' 与 'hold', 值为测量值字符串
+        :param measure_index: measurement number used by the setup time measurement
+        :return: dict with the keys 'setup' and 'hold' and string values
         """
         return {
             "setup": self.get_measurement_result(measure_index),
@@ -1559,17 +1604,18 @@ class MXO4(RsInstrument):
         }
 
     # ------------------------------------------------------------------
-    # 眼图 (Eye Diagram)
+    # Eye diagram
     # ------------------------------------------------------------------
     def configure_cdr(self, source="C1", bit_rate=None, sw_cdr=1):
         """
-        配置软件时钟数据恢复 (CDR)。
+        Configure the software clock data recovery (CDR).
 
-        眼图 / 抖动分析需要 CDR 从串行数据流中恢复时钟。
+        Eye diagram / jitter analysis need a CDR to recover the clock from the
+        serial data stream.
 
-        :param source:   数据信源 (C1..C4 / DIFF1 等)
-        :param bit_rate: 码率 (bit/s), 例如 1e9 表示 1 Gbps
-        :param sw_cdr:   软件 CDR 编号 (默认 1)
+        :param source:   data source (C1..C4 / DIFF1, ...)
+        :param bit_rate: bit rate (bit/s), e.g. 1e9 for 1 Gbps
+        :param sw_cdr:   software CDR number (1 by default)
         """
         self.write(f"CDR:SOFTware{sw_cdr}:ESSRate:SOURce {self._src(source)}")
         if bit_rate is not None:
@@ -1577,21 +1623,21 @@ class MXO4(RsInstrument):
 
     def configure_eye_diagram(self, source="C1", cdr_mode="SW", enable=True):
         """
-        配置眼图 (Eye Diagram)。
+        Configure the eye diagram.
 
-        :param source:   信号源 (C1..C4 / DIFF1 / 数学信号)
-        :param cdr_mode: CDR 模式: "SW" 软件 CDR (推荐), "HW" 硬件 CDR
-        :param enable:   True 打开眼图, False 关闭
+        :param source:   signal source (C1..C4 / DIFF1 / math signal)
+        :param cdr_mode: CDR mode: "SW" software CDR (recommended), "HW" hardware CDR
+        :param enable:   True switches the eye diagram on, False off
         """
         self.write(f"EYE1:SOURce {self._src(source)}")
         if str(cdr_mode).upper() in ("SW", "SOFTware", "SOFTWARE"):
-            # 软件 CDR
+            # software CDR
             self.write("EYE1:TIMReference:SOURce CDR")
             self.write("EYE1:TIMReference:CDR:SELect SW")
             self.write("EYE1:TIMReference:CDR:SOFTware SW1")
             self.write(f"CDR:SOFTware1:ESSRate:SOURce {self._src(source)}")
         else:
-            # 硬件 CDR (触发方式改为 CDR)
+            # hardware CDR (the trigger type is switched to CDR)
             self.write(f"TRIGger:EVENt1:SOURce {self._src(source)}")
             self.write("TRIGger:EVENt1:TYPe CDR")
         self.write(f"EYE1:STATe {'ON' if enable else 'OFF'}")
@@ -1601,13 +1647,13 @@ class MXO4(RsInstrument):
                                   main=EyeMeasurement.EYE_HEIGHT,
                                   additional=None, enable=True):
         """
-        配置眼图测量 (眼高 / 眼宽 / 眼幅度等)。
+        Configure an eye diagram measurement (eye height / eye width / eye amplitude, ...).
 
-        :param measure_index: 测量编号
-        :param source:        测量源, 默认 EYE1
-        :param main:          主测量项 (EyeMeasurement 或字符串)
-        :param additional:    附加测量项列表 (EyeMeasurement 或字符串)
-        :param enable:        True 启用测量
+        :param measure_index: measurement number
+        :param source:        measurement source, EYE1 by default
+        :param main:          main measurement (EyeMeasurement or a string)
+        :param additional:    list of additional measurements (EyeMeasurement or strings)
+        :param enable:        True enables the measurement
         """
         m = main.value if isinstance(main, EyeMeasurement) else main
         self.write(f"MEASurement{measure_index}:CATegory EYEJitter")
@@ -1621,24 +1667,27 @@ class MXO4(RsInstrument):
 
     def get_eye_result(self, measure_index=1, result_index=1):
         """
-        读取眼图测量结果。
+        Read an eye diagram measurement result.
 
-        :param measure_index: 测量编号
-        :param result_index:  1 = 主测量 (如眼高), >1 = 附加测量 (眼宽/眼幅度等)
+        :param measure_index: measurement number
+        :param result_index:  1 = main measurement (e.g. eye height),
+                              >1 = additional measurements (eye width, ...)
         """
         return self.get_measurement_result(measure_index, result_index)
 
     # ------------------------------------------------------------------
-    # 抖动分析 (Advanced Jitter)
+    # Advanced jitter analysis
     # ------------------------------------------------------------------
     def configure_jitter_quick_start(self, source="C1", timeout=120000):
         """
-        高级抖动分析快速开始 (自动配置码率与 CDR, 并启用所有抖动分量)。
+        Advanced jitter analysis quick start (configures bit rate and CDR
+        automatically and enables all jitter components).
 
-        注意: 该命令会自动启用 TJ@BER、RJ、TJ、DJ、PJ、DDJ 等分量。
+        Note: this command enables the components TJ@BER, RJ, TJ, DJ, PJ, DDJ, ...
+        automatically.
 
-        :param source:  数据信源 (C1..C4 / DIFF1 等)
-        :param timeout: 等待超时 (ms), 快速开始可能需要 30~60 秒
+        :param source:  data source (C1..C4 / DIFF1, ...)
+        :param timeout: wait timeout (ms), the quick start may take 30~60 seconds
         """
         self.write(f"ADVJitter:SIGNal:SOURce {self._src(source)}")
         self.write("ADVJitter:SIGNal:QUICkmeas")
@@ -1646,14 +1695,14 @@ class MXO4(RsInstrument):
 
     def configure_jitter_manual(self, source="C1", components=None):
         """
-        手动配置高级抖动分量。
+        Configure the advanced jitter components manually.
 
-        :param source:     数据信源 (C1..C4 / DIFF1 等)
-        :param components: JitterComponent 列表或分量编号列表
+        :param source:     data source (C1..C4 / DIFF1, ...)
+        :param components: list of JitterComponent members or component numbers
         """
         self.write(f"ADVJitter1:SIGNal:SOURce {self._src(source)}")
         self.write("ADVJitter1:RESult:ENABle ON")
-        # 关闭快速开始自动开启的附加显示项
+        # switch off the additional displays enabled by the quick start
         for cmd in ("ADVJitter1:RESult:STEPresponse OFF",
                     "ADVJitter1:RESult:BATHtub OFF",
                     "ADVJitter1:RESult:NBAThtub OFF"):
@@ -1667,31 +1716,32 @@ class MXO4(RsInstrument):
             self.write(f"ADVJitter1:RESult:COMPonents{idx}:HISTogram ON")
 
     def enable_jitter_result(self, on=True):
-        """开关高级抖动结果显示 ``ADVJitter1:RESult:ENABle``。"""
+        """Switch the advanced jitter result display on/off ``ADVJitter1:RESult:ENABle``."""
         self.write(f"ADVJitter1:RESult:ENABle {'ON' if on else 'OFF'}")
 
     def enable_jitter_component(self, component, on=True):
-        """开关单个抖动分量 ``ADVJitter1:DCOMposition:COMPonents<idx>:ENABle``。"""
+        """Switch a single jitter component on/off ``ADVJitter1:DCOMposition:COMPonents<idx>:ENABle``."""
         idx = component.value if isinstance(component, JitterComponent) else int(component)
         self.write(f"ADVJitter1:DCOMposition:COMPonents{idx}:ENABle {'ON' if on else 'OFF'}")
 
     def get_jitter_component_value(self, component):
         """
-        读取抖动分量测量值 (单位: 秒)。
+        Read a jitter component measurement value (unit: seconds).
 
-        命令: ADVJitter1:RESult:COMPonents<idx>:VALue?
-        (个别固件版本命令可能略有差异, 可参照手册 "Advanced jitter" 章节调整)
+        Command: ADVJitter1:RESult:COMPonents<idx>:VALue?
+        (individual firmware revisions may differ slightly, see the
+        "Advanced jitter" chapter of the manual)
 
-        :param component: JitterComponent 枚举或分量编号
+        :param component: JitterComponent member or component number
         """
         idx = component.value if isinstance(component, JitterComponent) else int(component)
         return self.query(f"ADVJitter1:RESult:COMPonents{idx}:VALue?")
 
     # ------------------------------------------------------------------
-    # 波形读取与保存
+    # Waveform readout and saving
     # ------------------------------------------------------------------
     def set_waveform_format(self, fmt=WaveformFormat.BINARY_FLOAT32):
-        """设置波形数据格式 ``FORMat:DATA`` (二进制时同时设置小端字节序)。"""
+        """Set the waveform data format ``FORMat:DATA`` (little endian is set for binary formats too)."""
         val = fmt.value if isinstance(fmt, WaveformFormat) else fmt
         if val.startswith("ASC"):
             self.write("FORMat:DATA ASC")
@@ -1701,11 +1751,12 @@ class MXO4(RsInstrument):
 
     def _parse_header(self, header_str):
         """
-        解析 ``CHANnel<n>:DATA:HEADer?`` 返回的头部。
+        Parse the header returned by ``CHANnel<n>:DATA:HEADer?``.
 
-        MXO4 头部可能以两种格式返回, 统一转换为字典:
-          1. name=value 逗号串:  XStart=-5e-6,XStop=5e-6,RecordLength=100000,ValsPerSmp=1
-          2. 固定顺序数值串:      -5e-6,5e-6,100000,1  (XStart,XStop,RecordLength,ValsPerSmp)
+        The MXO4 may return the header in two formats, both are converted into a
+        dictionary:
+          1. name=value comma string: XStart=-5e-6,XStop=5e-6,RecordLength=100000,ValsPerSmp=1
+          2. fixed order numeric string: -5e-6,5e-6,100000,1  (XStart,XStop,RecordLength,ValsPerSmp)
         """
         header_str = header_str.replace("\n", "").replace(";", ",").strip()
         parts = [p.strip() for p in header_str.split(",") if p.strip() != ""]
@@ -1716,7 +1767,7 @@ class MXO4(RsInstrument):
                     k, v = part.split("=", 1)
                     d[k.strip()] = v.strip()
         else:
-            # 无 name=value 时按固定位置解析
+            # parse by fixed position when no name=value pairs are present
             names = ("XStart", "XStop", "RecordLength", "ValsPerSmp")
             for name, val in zip(names, parts):
                 d[name] = val
@@ -1724,7 +1775,7 @@ class MXO4(RsInstrument):
 
     @staticmethod
     def _header_value(header, *keys):
-        """在头部字典中按 key (不区分大小写/模糊匹配) 查找值。"""
+        """Look up a value in the header dictionary by key (case insensitive / fuzzy match)."""
         low = {k.lower(): v for k, v in header.items()}
         for key in keys:
             k = key.lower()
@@ -1737,15 +1788,16 @@ class MXO4(RsInstrument):
         return None
 
     def get_waveform_header(self, channel):
-        """读取波形头 ``CHANnel<n>:DATA:HEADer?``, 返回字典。"""
+        """Read the waveform header ``CHANnel<n>:DATA:HEADer?``, returns a dictionary."""
         return self._parse_header(self.query(f"CHANnel{self._ch(channel)}:DATA:HEADer?"))
 
     # def get_waveform(self, channel, ascii_format=False):
     #     """
-    #     读取单通道波形数据, 返回 (时间轴列表, 电压列表)。
+    #     Read the waveform data of one channel, returns (time axis list, voltage list).
 
-    #     :param channel:      通道号
-    #     :param ascii_format: True 使用 ASCII 传输 (慢但直观), False 使用 float32 二进制 (快)
+    #     :param channel:      channel number
+    #     :param ascii_format: True uses ASCII transfer (slow but readable),
+    #                          False uses float32 binary (fast)
     #     """
     #     ch = self._ch(channel)
     #     hdr = self.get_waveform_header(channel)
@@ -1757,12 +1809,13 @@ class MXO4(RsInstrument):
     #         self.write("FORMat:DATA REAL,32")
     #         self.write("FORMat:BORDer LSBFirst")
     #         self.bin_float_numbers_format = BinFloatFormat.Single_4bytes
-    #         # 大记录长度下二进制传输耗时较长, 临时增大 VISA 超时与读取块大小,
-    #         # 避免大数据量时出现超时报错 (VI_ERROR_TMO)
+    #         # a binary transfer of a large record length takes a long time, so the
+    #         # VISA timeout and the read chunk size are increased temporarily to
+    #         # avoid a timeout error (VI_ERROR_TMO) with large amounts of data
     #         old_timeout = self.visa_timeout
     #         old_chunk = self.data_chunk_size
     #         try:
-    #             # 超时至少 30 秒, 足够传输数百万个采样点
+    #             # a timeout of at least 30 seconds, enough for millions of samples
     #             self.visa_timeout = max(int(old_timeout or 0), 300000)
     #             self.data_chunk_size = 10_000_000
     #             volts = self.query_bin_or_ascii_float_list(
@@ -1776,8 +1829,10 @@ class MXO4(RsInstrument):
     #     n = len(volts)
     #     if n > 1:
     #         if xstop == xstart:
-    #             # 头部时间信息缺失/异常时, 用时基范围兜底重建时间轴, 避免时间列全为 0
-    #             print("警告: 波形头时间信息无效, 使用 TIMebase:RANGe? 重建时间轴。")
+    #             # when the time information of the header is missing or invalid, the
+    #             # time axis is rebuilt from the timebase range so that the time column
+    #             # does not consist of zeros
+    #             print("Warning: invalid waveform header time information, rebuilding the time axis from TIMebase:RANGe?.")
     #             try:
     #                 t_range = float(self.query("TIMebase:RANGe?"))
     #             except Exception:
@@ -1792,7 +1847,7 @@ class MXO4(RsInstrument):
 
     # def get_waveforms(self, channels, ascii_format=False):
     #     """
-    #     读取多通道波形, 返回 dict: {channel: (time_axis, volts)}。
+    #     Read the waveforms of several channels, returns dict: {channel: (time_axis, volts)}.
     #     """
     #     result = {}
     #     for ch in channels:
@@ -1800,15 +1855,16 @@ class MXO4(RsInstrument):
     #     return result
 
     # ------------------------------------------------------------------
-    # 波形 ZOOM (UART 帧触发后自动框住 UART 帧; 仪器端显示放大 + PC 端绘图放大)
+    # Waveform ZOOM (frames the UART frame automatically after a UART frame
+    # trigger; instrument side display zoom + PC side plot zoom)
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
-    # 1) 仪器端: 时基窗口放大 / 恢复
+    # 1) instrument side: zoom the timebase window / restore it
     # ------------------------------------------------------------------
     def get_timebase_state(self):
         """
-        读取当前时基状态 (SCALe / RANGe / REFerence / HORizontal:POSition),
-        用于 ZOOM 之后恢复原显示。
+        Read the current timebase state (SCALe / RANGe / REFerence /
+        HORizontal:POSition) so the original display can be restored after a ZOOM.
         """
         state = {}
         for key, cmd in (("scale", "TIMebase:SCALe?"),
@@ -1822,10 +1878,11 @@ class MXO4(RsInstrument):
         return state
 
     def restore_timebase(self, state):
-        """恢复由 :meth:`get_timebase_state` 保存的时基 (缩放/位置/参考点)。"""
+        """Restore a timebase saved by :meth:`get_timebase_state` (scale/position/reference)."""
         if not state:
             return
-        # 先恢复参考点与跨度, 再恢复偏移, 最后恢复缩放, 避免中间状态越界
+        # restore reference point and span first, then the offset and the scale
+        # last, so that no intermediate state goes out of range
         if state.get("reference") is not None:
             try:
                 self.timebase_position(state["reference"])
@@ -1848,30 +1905,31 @@ class MXO4(RsInstrument):
                 pass
 
     # ------------------------------------------------------------------
-    # MXO4 分屏 ZOOM 窗口 (主区保留完整波形/解码帧, ZOOM 区只放大其中一帧)
-    #   注意: MXO4 使用 LAYout<ly>:ZOOM<zo>:* 节点, 不是 TIMebase:ZOOM
+    # MXO4 split screen ZOOM window (the main area keeps the complete waveform /
+    # decoded frame, the ZOOM area only magnifies one of them)
+    #   note: the MXO4 uses the LAYout<ly>:ZOOM<zo>:* node, not TIMebase:ZOOM
     # ------------------------------------------------------------------
     def zoom_window_state(self, on=True, layout=1, zoom=1):
-        """启用/关闭分屏 ZOOM 窗口 ``LAYout<ly>:ZOOM<zo>:ENABle``。"""
+        """Enable/disable the split screen ZOOM window ``LAYout<ly>:ZOOM<zo>:ENABle``."""
         self.write(f"LAYout{layout}:ZOOM{zoom}:ENABle {'ON' if on else 'OFF'}")
 
     def zoom_window_source(self, diagram=1, layout=1, zoom=1):
-        """设置 ZOOM 放大哪个图 (diagram 索引) ``LAYout<ly>:ZOOM<zo>:SOURce``。"""
+        """Select which diagram is magnified by the ZOOM (diagram index) ``LAYout<ly>:ZOOM<zo>:SOURce``."""
         self.write(f"LAYout{layout}:ZOOM{zoom}:SOURce {int(diagram)}")
 
     def get_zoom_window_diagram(self, layout=1, zoom=1):
-        """查询当前 ZOOM 所放大的图索引 ``LAYout<ly>:ZOOM<zo>:DIAG?``。"""
+        """Query the index of the diagram currently magnified by the ZOOM ``LAYout<ly>:ZOOM<zo>:DIAG?``."""
         return self.query(f"LAYout{layout}:ZOOM{zoom}:DIAG?")
 
     def zoom_window_horizontal(self, mode="ABS", position=None, span=None,
                                start=None, stop=None, layout=1, zoom=1):
         """
-        设置 ZOOM 区的水平范围。
+        Set the horizontal range of the ZOOM area.
 
-        :param mode: 'ABS' 绝对时间 (s) / 'REL' 相对百分比 (%)
-        :param position: ZOOM 区中心 (ABS: s, 0s=触发点; REL: %)
-        :param span:     ZOOM 区宽度 (ABS: s; REL: %)
-        :param start/stop: ZOOM 区下/上限 (ABS: s; REL: %)
+        :param mode: 'ABS' absolute time (s) / 'REL' relative percentage (%)
+        :param position: centre of the ZOOM area (ABS: s, 0 s = trigger point; REL: %)
+        :param span:     width of the ZOOM area (ABS: s; REL: %)
+        :param start/stop: lower/upper limit of the ZOOM area (ABS: s; REL: %)
         """
         mode = "ABS" if str(mode).upper() in ("ABS", "ABSOLUTE") else "REL"
         node = "ABSolute" if mode == "ABS" else "RELative"
@@ -1888,34 +1946,40 @@ class MXO4(RsInstrument):
     def zoom_display(self, span=None, s_per_div=None, t_center=None,
                      reacquire=True, acquire_timeout=8000):
         """
-        在示波器上把水平显示窗口放大到指定范围 (ZOOM), 供截屏保存放大波形。
+        Magnify the horizontal display window on the scope to a given range (ZOOM)
+        so that a zoomed waveform can be saved as a screenshot.
 
-        :param span:           整屏时间跨度 (s), 例如一帧 UART 数据对应的时间
-        :param s_per_div:      每格时间 (s); 与 span 二选一 (s_per_div * 10 = span)
-        :param t_center:       希望置于屏幕中央的绝对时间 (s, 需参考点为 50% 时生效)。
-                               MXO4 的水平平移命令为 ``TIMebase:HORizontal:POSition``
-                               (触发点 t=0 与参考点之间的距离, 即 offset = -t_center);
-                               若放大后波形不在期望位置, 可对 t_center 取反微调。
-        :param reacquire:      True 则重新执行一次 ``SINGle`` 刷新放大后的显示
-                               (需触发能量新触发; 等待时间由 acquire_timeout 限制,
-                               超时仅告警, 不中断流程)
-        :param acquire_timeout: 重新采集等待超时 (ms)
-        :return: dict(span, s_per_div, t_center) 实际采用的窗口
+        :param span:           full screen time span (s), e.g. the time of one UART frame
+        :param s_per_div:      time per division (s); alternative to span
+                               (s_per_div * 10 = span)
+        :param t_center:       absolute time (s) that should be centred on the
+                               screen (only effective with a reference point of
+                               50%). The MXO4 horizontal shift command is
+                               ``TIMebase:HORizontal:POSition`` (distance between
+                               the trigger point t=0 and the reference point, i.e.
+                               offset = -t_center); invert t_center for fine tuning
+                               if the magnified waveform is not where you expect it.
+        :param reacquire:      True runs another ``SINGle`` to refresh the magnified
+                               display (this needs a trigger; the wait time is
+                               limited by acquire_timeout, a timeout only warns and
+                               does not interrupt the flow)
+        :param acquire_timeout: timeout for the re-acquisition (ms)
+        :return: dict(span, s_per_div, t_center) actually used window
         """
         if s_per_div is not None:
             span = float(s_per_div) * 10.0
         if span is None:
-            raise ValueError("zoom_display: 必须提供 span 或 s_per_div")
+            raise ValueError("zoom_display: span or s_per_div must be given")
         span = float(span)
         self.timebase_range(span)
         if t_center is not None:
-            self.timebase_offset(-float(t_center))   # 平移窗口使绝对时刻 t_center 位于屏中央
+            self.timebase_offset(-float(t_center))   # shift the window so that t_center is centred on the screen
         if reacquire:
             try:
                 self.write("SINGle")
                 self.wait_opc(timeout=acquire_timeout)
             except Exception as exc:
-                print(f"警告: ZOOM 后重新采集失败/超时 (可能未再次触发): {exc}")
+                print(f"Warning: re-acquisition after ZOOM failed/timed out (no new trigger?): {exc}")
         return {"span": span, "s_per_div": span / 10.0, "t_center": t_center}
 
     def zoom_uart_display(self, baud=115200, data_bits=8,
@@ -1923,24 +1987,27 @@ class MXO4(RsInstrument):
                           margin_bits=2.0, diagram=1, layout=1, zoom=1,
                           reacquire=True, acquire_timeout=8000):
         """
-        仪器端分屏 ZOOM: UART 串行总线触发成功后, 在主区保留完整波形
-        (含 UART 解码区的全部数据帧), 只在 ZOOM 放大区显示其中一帧
-        (默认放大触发点附近的那一帧)。
+        Instrument side split screen ZOOM: after a successful UART serial bus
+        trigger the main area keeps the complete waveform (all data frames of the
+        UART decoder) and the ZOOM area magnifies just one frame (the frame
+        around the trigger point by default).
 
-        与 :meth:`zoom_display` (直接修改整屏时基) 不同, 本方法使用 MXO4 的
-        分屏 ZOOM 窗口 ``LAYout<ly>:ZOOM<zo>:*``:
-          * 主区 (原 diagram) 继续显示完整波形与全部 UART 解码帧;
-          * ZOOM 区按 ABS 水平窗口圈出单帧 (串行总线触发点在帧起始位 t≈0)。
+        Unlike :meth:`zoom_display` (which changes the full screen timebase), this
+        method uses the MXO4 split screen ZOOM window ``LAYout<ly>:ZOOM<zo>:*``:
+          * the main area (original diagram) keeps showing the complete waveform
+            and all UART decoded frames;
+          * the ZOOM area frames a single frame with an ABS horizontal window
+            (the serial bus trigger point is at the frame start bit, t~0).
 
-        :param baud:        波特率
-        :param data_bits:   数据位 (7/8/9)
-        :param parity:      校验位
-        :param stop_bits:   停止位
-        :param margin_bits: 帧前后额外保留的空闲位数
-        :param diagram:     ZOOM 所放大的 diagram 索引 (默认 1, 即主波形图)
-        :param layout:      SmartGrid layout 索引 (默认 1)
-        :param zoom:        ZOOM 窗口索引 (默认 1)
-        :param reacquire:   True 则先重新执行一次 SINGle 刷新采集 (可选)
+        :param baud:        baud rate
+        :param data_bits:   number of data bits (7/8/9)
+        :param parity:      parity
+        :param stop_bits:   stop bits
+        :param margin_bits: extra idle bit times kept before and after the frame
+        :param diagram:     diagram index magnified by the ZOOM (1 = main waveform by default)
+        :param layout:      SmartGrid layout index (1 by default)
+        :param zoom:        ZOOM window index (1 by default)
+        :param reacquire:   True runs another SINGle to refresh the acquisition first
         :return: dict(frame_time, span, s_per_div, zoom_start, zoom_stop)
         """
         n_parity = MXO4._parity_bit_count(parity)
@@ -1948,8 +2015,8 @@ class MXO4(RsInstrument):
         bit_time = 1.0 / float(baud)
         frame_time = (1 + int(data_bits) + n_parity + n_stop) * bit_time
         margin = max(0.0, margin_bits) * bit_time
-        zoom_start = -margin                        # 帧起始位(触发点 t≈0)前留 margin
-        zoom_stop = frame_time + margin             # 帧结束(含停止位)后留 margin
+        zoom_start = -margin                        # keep a margin before the frame start bit (trigger point t~0)
+        zoom_stop = frame_time + margin             # keep a margin after the frame end (incl. stop bits)
         span = zoom_stop - zoom_start
 
         if reacquire:
@@ -1957,9 +2024,10 @@ class MXO4(RsInstrument):
                 self.write("SINGle")
                 self.wait_opc(timeout=acquire_timeout)
             except Exception as exc:
-                print(f"警告: ZOOM 前重新采集失败/超时 (可能未再次触发): {exc}")
+                print(f"Warning: re-acquisition before ZOOM failed/timed out (no new trigger?): {exc}")
 
-        # 主区保留完整波形/解码帧; 仅启用 ZOOM 窗口并圈出单帧
+        # the main area keeps the complete waveform/decoded frames; only the ZOOM
+        # window is enabled and frames a single frame
         self.zoom_window_state(True, layout=layout, zoom=zoom)
         self.zoom_window_source(diagram, layout=layout, zoom=zoom)
         self.zoom_window_horizontal(mode="ABS", start=zoom_start, stop=zoom_stop,
@@ -1972,29 +2040,32 @@ class MXO4(RsInstrument):
                          diagram=1, layout=1, zoom=1,
                          reacquire=True, acquire_timeout=8000):
         """
-        仪器端分屏 ZOOM: I2C 串行总线触发成功后, 在主区保留完整波形
-        (含 I2C 解码区的全部数据帧), 只在 ZOOM 放大区显示其中一帧
-        (默认放大 START 触发点之后的一个字节: 8 数据位 + 1 ACK = 9 SCL 时钟)。
+        Instrument side split screen ZOOM: after a successful I2C serial bus
+        trigger the main area keeps the complete waveform (all data frames of the
+        I2C decoder) and the ZOOM area magnifies just one frame (one byte after
+        the START trigger point by default: 8 data bits + 1 ACK = 9 SCL clocks).
 
-        与 :meth:`zoom_display` (直接修改整屏时基) 不同, 本方法使用 MXO4 的
-        分屏 ZOOM 窗口 ``LAYout<ly>:ZOOM<zo>:*``:
-          * 主区 (原 diagram) 继续显示完整波形与全部 I2C 解码帧;
-          * ZOOM 区按 ABS 水平窗口圈出单帧 (I2C START 触发点在 t≈0)。
+        Unlike :meth:`zoom_display` (which changes the full screen timebase), this
+        method uses the MXO4 split screen ZOOM window ``LAYout<ly>:ZOOM<zo>:*``:
+          * the main area (original diagram) keeps showing the complete waveform
+            and all I2C decoded frames;
+          * the ZOOM area frames a single frame with an ABS horizontal window
+            (the I2C START trigger point is at t~0).
 
-        :param scl_freq:    SCL 时钟频率 (Hz), 例如 100e3 / 400e3 / 1e6
-        :param frame_bits:  单帧占的 SCL 时钟数 (默认 9 = 8 数据位 + 1 ACK)
-        :param margin_bits: 帧前后额外保留的 SCL 时钟数
-        :param diagram:     ZOOM 所放大的 diagram 索引 (默认 1, 即主波形图)
-        :param layout:      SmartGrid layout 索引 (默认 1)
-        :param zoom:        ZOOM 窗口索引 (默认 1)
-        :param reacquire:   True 则先重新执行一次 SINGle 刷新采集 (可选)
+        :param scl_freq:    SCL clock frequency (Hz), e.g. 100e3 / 400e3 / 1e6
+        :param frame_bits:  number of SCL clocks of one frame (9 by default = 8 data bits + 1 ACK)
+        :param margin_bits: extra SCL clocks kept before and after the frame
+        :param diagram:     diagram index magnified by the ZOOM (1 = main waveform by default)
+        :param layout:      SmartGrid layout index (1 by default)
+        :param zoom:        ZOOM window index (1 by default)
+        :param reacquire:   True runs another SINGle to refresh the acquisition first
         :return: dict(frame_time, span, s_per_div, zoom_start, zoom_stop)
         """
         bit_time = 1.0 / float(scl_freq)
         frame_time = float(frame_bits) * bit_time
         margin = max(0.0, margin_bits) * bit_time
-        zoom_start = -margin                        # START(触发点 t≈0)前留 margin
-        zoom_stop = frame_time + 2*margin             # 一帧结束后留 margin
+        zoom_start = -margin                        # keep a margin before START (trigger point t~0)
+        zoom_stop = frame_time + 2*margin             # keep a margin after one frame
         span = zoom_stop - zoom_start
 
         if reacquire:
@@ -2002,9 +2073,10 @@ class MXO4(RsInstrument):
                 self.write("SINGle")
                 self.wait_opc(timeout=acquire_timeout)
             except Exception as exc:
-                print(f"警告: ZOOM 前重新采集失败/超时 (可能未再次触发): {exc}")
+                print(f"Warning: re-acquisition before ZOOM failed/timed out (no new trigger?): {exc}")
 
-        # 主区保留完整波形/解码帧; 仅启用 ZOOM 窗口并圈出单帧
+        # the main area keeps the complete waveform/decoded frames; only the ZOOM
+        # window is enabled and frames a single frame
         self.zoom_window_state(True, layout=layout, zoom=zoom)
         self.zoom_window_source(diagram, layout=layout, zoom=zoom)
         self.zoom_window_horizontal(mode="ABS", start=zoom_start, stop=zoom_stop,
@@ -2014,11 +2086,11 @@ class MXO4(RsInstrument):
                 "zoom_start": zoom_start, "zoom_stop": zoom_stop}
 
     # ------------------------------------------------------------------
-    # 2) UART 软件解码 / 帧定位 (自动框住 UART 帧的核心)
+    # 2) Software UART decoding / frame localization (core of the automatic framing)
     # ------------------------------------------------------------------
     @staticmethod
     def _parity_bit_count(parity):
-        """UART 校验位是否启用: NONE -> 0, 其余 -> 1。"""
+        """Whether the UART parity bit is enabled: NONE -> 0, anything else -> 1."""
         if isinstance(parity, UARTParity):
             s = parity.value.upper()
         else:
@@ -2027,7 +2099,7 @@ class MXO4(RsInstrument):
 
     @staticmethod
     def _stop_bit_count(stop_bits):
-        """UART 停止位个数 (数值): 'B1'->1, 'B15'->1.5, 'B2'->2, 数值直接返回。"""
+        """Number of UART stop bits: 'B1'->1, 'B15'->1.5, 'B2'->2, numbers are returned as is."""
         if isinstance(stop_bits, STOPBit):
             s = stop_bits.value.upper()
         else:
@@ -2047,22 +2119,26 @@ class MXO4(RsInstrument):
                              parity=UARTParity.NONE, stop_bits=STOPBit.ONE_BIT,
                              idle=UARTPOLarity.IDLHigh, threshold=1.65):
         """
-        纯软件 UART 帧解码 / 定位 (不依赖仪器的协议分析选件), 用于自动框选 ZOOM 区域。
+        Pure software UART frame decoding / localization (independent of the
+        protocol analysis option of the instrument), used to frame the ZOOM area
+        automatically.
 
-        从已采集的 RX 波形中逐帧识别 UART 帧:
-          * 帧结构 = 起始位 + 数据位 + (校验位) + 停止位(空闲电平);
-          * 对每个候选起始沿, 在位中心处采样比特, 按 LSB first 重建数据。
-        本方法是静态方法, 可在无仪器 / 离线场合直接调用 (便于本地验证与事后分析)。
+        UART frames are identified one by one in the acquired RX waveform:
+          * frame structure = start bit + data bits + (parity bit) + stop bit(s) (idle level);
+          * for every candidate start edge the bits are sampled at the bit centre
+            and the data is rebuilt LSB first.
+        This static method can be called without an instrument / offline, which is
+        convenient for local verification and post-processing.
 
-        :param time_axis: 时间轴 (s)
-        :param volts:     电压 (V), 与 time_axis 等长
-        :param baud:      波特率
-        :param data_bits: 数据位 (7/8/9)
+        :param time_axis: time axis (s)
+        :param volts:     voltage (V), same length as time_axis
+        :param baud:      baud rate
+        :param data_bits: number of data bits (7/8/9)
         :param parity:    UARTParity.NONE / EVEN / ODD / MARK / SPC
-        :param stop_bits: STOPBit.ONE_BIT / .ONE_P_FIVE_BITS / .TWO_BITS, 或数值 1/1.5/2
-        :param idle:      UARTPOLarity.IDLHigh(空闲高) / IDLLow(空闲低)
-        :param threshold: 逻辑判定阈值 (V)
-        :return: list[dict], 按 t_start 升序; 每帧含:
+        :param stop_bits: STOPBit.ONE_BIT / .ONE_P_FIVE_BITS / .TWO_BITS, or 1/1.5/2
+        :param idle:      UARTPOLarity.IDLHigh (idle high) / IDLLow (idle low)
+        :param threshold: logic decision threshold (V)
+        :return: list[dict] sorted by t_start; every frame holds:
             index / t_start / t_stop / t_center / bit_time /
             bits / data_int / data_bin / data_hex / data_ascii /
             parity_error / stop_ok / valid
@@ -2073,7 +2149,7 @@ class MXO4(RsInstrument):
         if t.ndim != 1 or v.ndim != 1 or len(t) != len(v) or len(t) < 8:
             return []
         bit_time = 1.0 / float(baud)
-        logic = (v >= float(threshold)).astype(bool)          # True = 高
+        logic = (v >= float(threshold)).astype(bool)          # True = high
         if isinstance(idle, UARTPOLarity):
             idle_high = (idle == UARTPOLarity.IDLHigh)
         else:
@@ -2081,15 +2157,15 @@ class MXO4(RsInstrument):
         n_parity = MXO4._parity_bit_count(parity)
         n_stop = MXO4._stop_bit_count(stop_bits)
         data_bits = int(data_bits)
-        head_bits = 1 + data_bits + n_parity                   # 起始 + 数据 + 校验
-        # 起始沿 = 空闲 -> 非空闲 的跳变沿
+        head_bits = 1 + data_bits + n_parity                   # start + data + parity
+        # start edge = transition from idle to non-idle
         if idle_high:
-            edges = np.flatnonzero(logic[:-1] & ~logic[1:])    # 高 -> 低
+            edges = np.flatnonzero(logic[:-1] & ~logic[1:])    # high -> low
         else:
-            edges = np.flatnonzero(~logic[:-1] & logic[1:])    # 低 -> 高
+            edges = np.flatnonzero(~logic[:-1] & logic[1:])    # low -> high
 
         def _level_at(tt, default):
-            """返回 tt 时刻附近的逻辑电平 (True=高), 越界用 default。"""
+            """Return the logic level near time tt (True=high), default when out of range."""
             idx = int(np.searchsorted(t, tt))
             if idx <= 0:
                 return bool(logic[0])
@@ -2105,26 +2181,27 @@ class MXO4(RsInstrument):
         last_frame_end = float("-inf")
         for i0 in edges:
             t_start = float(t[i0])
-            # 起始位中心必须是非空闲电平
+            # the centre of the start bit must be the non-idle level
             if _level_at(t_start + 0.5 * bit_time, idle_high) == idle_high:
                 continue
             t_frame_end = t_start + (head_bits + n_stop) * bit_time
-            if t_frame_end > float(t[-1]) + bit_time:          # 帧超出记录范围
+            if t_frame_end > float(t[-1]) + bit_time:          # frame exceeds the record
                 continue
-            # 与已接收帧重叠 (上一帧数据尚未结束), 跳过帧内部毛刺沿
+            # overlap with an already received frame (the previous frame has not
+            # ended yet): skip glitch edges inside a frame
             if t_start < last_frame_end - 0.2 * bit_time:
                 continue
             bits = [_level_at(t_start + (k + 0.5) * bit_time, idle_high)
                     for k in range(head_bits)]
-            if bits[0] == idle_high:                           # 起始位必须非空闲
+            if bits[0] == idle_high:                           # the start bit must be non-idle
                 continue
             data_vals = bits[1:1 + data_bits]
             par_val = bits[1 + data_bits] if n_parity else None
             stop_val = _level_at(t_start + (head_bits + n_stop * 0.5) * bit_time,
                                  idle_high)
-            # LSB first 组装数据
+            # assemble the data LSB first
             data_int = sum((1 << j) for j, b in enumerate(data_vals) if b)
-            # 奇偶校验
+            # parity check
             parity_error = False
             if n_parity and par_val is not None:
                 ones = sum(1 for b in data_vals if b)
@@ -2166,9 +2243,9 @@ class MXO4(RsInstrument):
                         idle=UARTPOLarity.IDLHigh, threshold=1.65,
                         ascii_format=False):
         """
-        读取指定 RX 通道波形并做软件 UART 帧定位。
+        Read the waveform of the given RX channel and localize the UART frames in software.
 
-        :return: (frames, (time_axis, volts))  frames 见 decode_uart_waveform
+        :return: (frames, (time_axis, volts)); see decode_uart_waveform for frames
         """
         t, v = self.get_waveform(rx_channel, ascii_format=ascii_format)
         frames = self.decode_uart_waveform(t, v, baud=baud, data_bits=data_bits,
@@ -2179,11 +2256,12 @@ class MXO4(RsInstrument):
     @staticmethod
     def pick_uart_frame(frames, which="trigger", index=0):
         """
-        从解码帧列表中挑选用于 ZOOM 的一帧。
+        Pick the frame used for the ZOOM out of the list of decoded frames.
 
-        :param which: 'trigger' -> 最靠近触发点 (t=0) 的一帧 (串行总线触发时通常即触发帧);
-                      'first'/'index' -> 取列表第 index 帧; 'last' -> 最后一帧
-        :return: 帧 dict 或 None
+        :param which: 'trigger' -> the frame closest to the trigger point (t=0),
+                      which is normally the triggering frame for a serial bus trigger;
+                      'first'/'index' -> frame number index; 'last' -> the last frame
+        :return: frame dict or None
         """
         if not frames:
             return None
@@ -2198,11 +2276,12 @@ class MXO4(RsInstrument):
     @staticmethod
     def uart_zoom_window(frame, margin_bits=2.0, min_span=None):
         """
-        由一帧计算自动 ZOOM 的水平窗口 (自动框住该 UART 帧)。
+        Compute the horizontal window of the automatic ZOOM from one frame
+        (frames that UART frame automatically).
 
-        :param margin_bits: 帧前后额外保留的空闲位数量
-        :param min_span:    最小整屏时间 (s), 避免放大过深
-        :return: dict(t_center, span, s_per_div, t_start_zoom, t_stop_zoom) 或 None
+        :param margin_bits: number of extra idle bit times kept before/after the frame
+        :param min_span:    minimum full screen time (s) so that the zoom is not too deep
+        :return: dict(t_center, span, s_per_div, t_start_zoom, t_stop_zoom) or None
         """
         if frame is None:
             return None
@@ -2224,17 +2303,19 @@ class MXO4(RsInstrument):
         }
 
     # ------------------------------------------------------------------
-    # 3) PC 端: 波形 ZOOM 绘图 (matplotlib)
+    # 3) PC side: waveform ZOOM plotting (matplotlib)
     # ------------------------------------------------------------------
     @staticmethod
     def _plot_waveform_png(t, v, out_path, window=None, frame=None,
                            title="", show_full_trace=False, dpi=150):
         """
-        将 (t, v) 波形绘制为 PNG (核心绘图函数, 静态, 便于离线测试)。
+        Plot the (t, v) waveform into a PNG (core plotting function, static, which
+        makes offline testing easy).
 
-        :param window:          (t0, t1) 放大区间, None 表示全貌
-        :param frame:           UART 帧 dict, 用阴影+竖线标出帧区域
-        :param show_full_trace: True 且指定 window 时, 用浅色画出完整波形作为背景
+        :param window:          (t0, t1) zoom range, None for the complete view
+        :param frame:           UART frame dict, marked with a shaded area + vertical lines
+        :param show_full_trace: True together with a window draws the complete
+                                waveform in a light colour as background
         """
         import numpy as np
         import matplotlib
@@ -2283,9 +2364,10 @@ class MXO4(RsInstrument):
                                  ascii_format=False, add_timestamp=False,
                                  title=None, show_full_trace=True):
         """
-        读取指定通道波形并保存 PNG; 给定 window=(t0, t1) 时只放大绘制该时间区间。
+        Read the waveform of the given channel and save it as a PNG; when
+        window=(t0, t1) is given only that time range is magnified and plotted.
 
-        :return: 生成的 PNG 路径
+        :return: path of the generated PNG
         """
         if add_timestamp:
             out_path = self._stamp(out_path)
@@ -2294,7 +2376,7 @@ class MXO4(RsInstrument):
         title = title or f"MXO4 CH{self._ch(channel)} Waveform"
         self._plot_waveform_png(t, v, out_path, window=window, frame=None,
                                 title=title, show_full_trace=show_full_trace)
-        print(f"波形窗口图已保存: {out_path}")
+        print(f"Waveform window image saved: {out_path}")
         return out_path
 
     def save_uart_zoom_png(self, rx_channel, out_path, baud=115200, data_bits=8,
@@ -2304,13 +2386,15 @@ class MXO4(RsInstrument):
                            ascii_format=False, add_timestamp=False,
                            show_full_trace=True, time_volts=None):
         """
-        PC 端 ZOOM: 读取 RX 通道波形 -> 软件定位 UART 帧 -> 自动放大保存 PNG。
+        PC side ZOOM: read the RX channel waveform -> localize the UART frame in
+        software -> magnify and save it as a PNG automatically.
 
-        :param rx_channel:    RX 通道号 (UART 波形所在通道, 例如 1)
-        :param out_path:      输出 PNG 路径 (自动加 _zoom 后缀与可选时间戳)
-        :param which:         选帧方式, 见 pick_uart_frame ('trigger' 默认)
-        :param margin_bits:   帧前后保留的空闲位数量
-        :param time_volts:    可选 (t, v), 提供时不再重复读取仪器波形
+        :param rx_channel:  RX channel number (channel carrying the UART signal, e.g. 1)
+        :param out_path:    output PNG path (a _zoom suffix and an optional timestamp are added)
+        :param which:       frame selection, see pick_uart_frame ('trigger' by default)
+        :param margin_bits: number of idle bit times kept before/after the frame
+        :param time_volts:  optional (t, v); when given the instrument waveform is
+                            not read again
         :return: (png_path, frame, window)
         """
         if add_timestamp:
@@ -2331,7 +2415,7 @@ class MXO4(RsInstrument):
                                     min_span=min_span) if frame else None
         ch = self._ch(rx_channel)
         if frame is None:
-            print(f"警告: CH{ch} 波形中未定位到 UART 帧, 保存全貌波形。")
+            print(f"Warning: no UART frame found in the CH{ch} waveform, saving the complete waveform.")
             self._plot_waveform_png(t, v, zoom_path, window=None, frame=None,
                                     title=f"MXO4 CH{ch} Waveform (no UART frame found)")
             return zoom_path, None, None
@@ -2342,8 +2426,8 @@ class MXO4(RsInstrument):
                                 window=(win["t_start_zoom"], win["t_stop_zoom"]),
                                 frame=frame, title=title,
                                 show_full_trace=show_full_trace)
-        print(f"UART 帧自动 ZOOM 图已保存: {zoom_path}  "
-              f"(帧#{frame['index']}: 0x{frame['data_hex']} '{frame['data_ascii']}', "
+        print(f"UART frame auto ZOOM image saved: {zoom_path}  "
+              f"(frame#{frame['index']}: 0x{frame['data_hex']} '{frame['data_ascii']}', "
               f"t = {frame['t_start']:.3e} ~ {frame['t_stop']:.3e} s)")
         return zoom_path, frame, win
 ##############################################################################################
@@ -2352,9 +2436,10 @@ class MXO4(RsInstrument):
     @staticmethod
     def _channel_list(channel):
         """
-        将 channel 参数归一化为通道列表。
+        Normalize the channel argument into a list of channels.
 
-        支持: int/str 单通道; list/tuple 多通道; 逗号分隔字符串 (例如 '1,2')。
+        Supports: int/str for a single channel; list/tuple for several channels;
+        a comma separated string (e.g. '1,2').
         """
         if channel is None:
             return []
@@ -2365,11 +2450,13 @@ class MXO4(RsInstrument):
         return [channel]
 
     def _read_waveform_direct(self, channel, ascii_format=False):
-        """  
-        直接从仪器读取单通道波形数据, 返回 (time_axis, volts)。
+        """
+        Read the waveform data of one channel directly from the instrument,
+        returns (time_axis, volts).
 
-        与 :meth:`save_waveform_csv_direct` 使用相同的分块传输读取逻辑,
-        但不写文件, 供多通道汇总使用。
+        It uses the same chunked transfer readout logic as
+        :meth:`save_waveform_csv_direct` but does not write a file, so it can be
+        used to gather several channels.
         """
         ch = self._ch(channel)
         hdr = self.get_waveform_header(channel)
@@ -2377,7 +2464,7 @@ class MXO4(RsInstrument):
         if ascii_format:
             start = time.time()
             self.write_str("FORM:DATA ASC")
-            self.data_chunk_size = 100000  # 按 100k 字节分块传输 (默认)
+            self.data_chunk_size = 100000  # transfer in 100k byte chunks (default)
             print('Now start to transfer ASCII waveform data. Please wait for about 120 seconds...')
             data = self.query_bin_or_ascii_float_list(f"CHANnel{ch}:DATA:VALues?")
             print(f'ASCII waveform transfer elapsed time: {time.time() - start:.3f}sec')
@@ -2386,7 +2473,7 @@ class MXO4(RsInstrument):
             start = time.time()
             self.write_str("FORMat:DATA REAL,32;:FORMat:BORDer LSBFirst")
             self.bin_float_numbers_format = BinFloatFormat.Single_4bytes
-            self.data_chunk_size = 100000  # 按 100k 字节分块传输 (默认)
+            self.data_chunk_size = 100000  # transfer in 100k byte chunks (default)
             print('Now start to transfer binary waveform data. Please wait for about 20 seconds...')
             data = self.query_bin_or_ascii_float_list(f"CHANnel{ch}:DATA:VALues?")
             print(f'Binary waveform transfer elapsed time: {time.time() - start:.3f}sec')
@@ -2404,9 +2491,9 @@ class MXO4(RsInstrument):
 
     def _write_waveforms_csv(self, pc_path, channels, data):
         """
-        将多通道波形数据写入同一 CSV 文件。
+        Write the waveform data of several channels into one CSV file.
 
-        列: Time(s), CH<x>(V), CH<y>(V), ...
+        Columns: Time(s), CH<x>(V), CH<y>(V), ...
         """
         first = channels[0]
         t, _ = data[first]
@@ -2422,18 +2509,19 @@ class MXO4(RsInstrument):
                     _, v = data[ch]
                     row.append(v[i] if i < len(v) else "")
                 writer.writerow(row)
-        print(f"波形已导出: {pc_path}  (共 {n} 点)")
+        print(f"Waveform exported: {pc_path}  ({n} points)")
 
     def _plot_waveforms(self, data, pc_path, channels):
         """
-        用 matplotlib 将多通道波形描点绘制为 PNG (每个通道一条曲线 + 图例)。
+        Plot the waveform of several channels into a PNG with matplotlib
+        (one curve and one legend entry per channel).
         """
         try:
             import matplotlib
-            matplotlib.use("Agg")          # 无界面后端, 便于在脚本/无显示环境运行
+            matplotlib.use("Agg")          # headless backend, for scripts / display-less environments
             import matplotlib.pyplot as plt
             root, ext = os.path.splitext(pc_path)
-            pc_path_plot = f"{root}.png"   # 强制保存为 PNG 图片
+            pc_path_plot = f"{root}.png"   # always save as a PNG image
             plt.figure(figsize=(10, 6))
             for ch in channels:
                 t, v = data[ch]
@@ -2449,29 +2537,33 @@ class MXO4(RsInstrument):
             plt.savefig(pc_path_plot, dpi=150)
             plt.close()
             n = max((len(v) for _, v in data.values()), default=0)
-            print(f"波形图片已保存: {pc_path_plot}  (共 {n} 点)")
+            print(f"Waveform image saved: {pc_path_plot}  ({n} points)")
         except ImportError:
-            print("未安装 matplotlib, 跳过波形绘图。")
+            print("matplotlib is not installed, waveform plotting skipped.")
 
     def save_waveform_csv(self, channel, pc_path=None, instr_path=None, ascii_format=False,
                           add_timestamp=True, filesave=None, localfile=None):
         """
-        将单通道或多通道波形导出为 CSV 文件, 并用 matplotlib 描点绘图。
+        Export the waveform of one or several channels into a CSV file and plot it
+        with matplotlib.
 
-        CSV 列: Time(s), CH<x>(V), CH<y>(V), ...
+        CSV columns: Time(s), CH<x>(V), CH<y>(V), ...
 
-        :param channel:       通道号 (int/str) 或通道列表/元组 (例如 [1, 2] 或 '1,2')
-        :param pc_path:       PC 上的 CSV 保存路径
-        :param instr_path:    仪器上的保存目录或路径 (filesave=True 时使用)
-        :param ascii_format:  True 使用 ASCII 传输, False 使用 float32 二进制 (快)
-        :param add_timestamp: True 时在文件名中自动加入时间戳
-        :param filesave:      False 直接读取; True 先经仪器文件保存再下载
-        :param localfile:     filesave=True 时是否保留仪器上的临时文件
+        :param channel:       channel number (int/str) or a channel list/tuple
+                              (e.g. [1, 2] or '1,2')
+        :param pc_path:       CSV path on the PC
+        :param instr_path:    save folder or path on the instrument (used when filesave=True)
+        :param ascii_format:  True uses ASCII transfer, False uses float32 binary (fast)
+        :param add_timestamp: True adds a timestamp to the file name automatically
+        :param filesave:      False reads directly; True saves the file on the
+                              instrument first and downloads it
+        :param localfile:     whether the temporary file on the instrument is kept
+                              when filesave=True
         :return: pc_path
         """
         channels = self._channel_list(channel)
         if not channels:
-            raise ValueError("save_waveform_csv: channel 不能为空")
+            raise ValueError("save_waveform_csv: channel must not be empty")
         if add_timestamp:
             pc_path = self._stamp(pc_path)
 
@@ -2485,7 +2577,8 @@ class MXO4(RsInstrument):
                 data[ch] = self.save_waveform_csv_via_instrument(
                     ch, pc_path=pc_path, instr_path=instr_path, localfile=localfile)
             if len(channels) > 1:
-                # 仪器端 CSV 每次只能导出一个源, 多通道需在 PC 端合并写回
+                # the instrument can only export one source per CSV file, so
+                # several channels are merged and written back on the PC
                 self._write_waveforms_csv(pc_path, channels, data)
 
         self._plot_waveforms(data, pc_path, channels)
@@ -2493,12 +2586,12 @@ class MXO4(RsInstrument):
 
     def save_waveforms_csv(self, channels, filename, ascii_format=False):
         """
-        将多通道波形导出为同一 CSV 文件。
+        Export the waveforms of several channels into one CSV file.
 
-        列: Time(s), CH<x>(V), CH<y>(V), ...
+        Columns: Time(s), CH<x>(V), CH<y>(V), ...
         """
         data = self.get_waveforms(channels, ascii_format=ascii_format)
-        # 以第一个通道的时间轴为基准
+        # use the time axis of the first channel as the reference
         first = channels[0]
         t, _ = data[first]
         self._ensure_dir(filename)
@@ -2513,16 +2606,18 @@ class MXO4(RsInstrument):
                     _, v = data[ch]
                     row.append(v[i] if i < len(v) else "")
                 writer.writerow(row)
-        print(f"多通道波形已导出: {filename}  (共 {n} 点)")
+        print(f"Multiple channel waveform exported: {filename}  ({n} points)")
         return filename
 
     def save_waveform_binary(self, channel, filename, add_timestamp=True):
         """
-        将波形原始电压值保存为二进制文件 (float32, 小端)。
+        Save the raw voltage values of a waveform into a binary file
+        (float32, little endian).
 
-        同时生成同名的 .txt 头文件记录采样点数与时间范围。
+        A .txt header file with the same name records the number of samples and the
+        time range.
 
-        :param add_timestamp: True 时在文件名中自动加入时间戳
+        :param add_timestamp: True adds a timestamp to the file name automatically
         """
         if add_timestamp:
             filename = self._stamp(filename)
@@ -2539,22 +2634,25 @@ class MXO4(RsInstrument):
             f.write(f"XStart={t[0]:.9e}\n")
             f.write(f"XStop={t[-1]:.9e}\n")
             f.write("Format=float32 little-endian\n")
-        print(f"原始波形已保存: {filename} / {head_file}")
+        print(f"Raw waveform saved: {filename} / {head_file}")
         return filename
 
     def save_waveform_image(self, filename, fmt="png", add_timestamp=True,
                           instr_dir=None, filesave=True,localfile=True):
         """
-        将波形截屏保存为图片文件 (整合了原 save_screenshot 的两种保存方式)。
+        Save a waveform screenshot as an image file (combines both saving methods
+        of the former save_screenshot).
 
-        :param filename:      波形图片保存路径 (建议扩展名 .png)
-        :param fmt:           截屏图片格式 (PNG/BMP/JPG/GIF/TIFF)
-        :param add_timestamp: True 时在文件名中自动加入时间戳
-        :param filesave:      False 直接获取截屏数据 (HCOPy:DATA?); True 先在仪器上
-                              保存文件再回传 PC (HCOPy:DESTination MMEM)
-        :param instr_dir:     filesave=True 时在仪器上创建的临时文件夹名称
-        :param localfile:     True 时将文件保存到本地
-        :return: 生成的图片路径
+        :param filename:      path of the waveform image (a .png extension is recommended)
+        :param fmt:           screenshot image format (PNG/BMP/JPG/GIF/TIFF)
+        :param add_timestamp: True adds a timestamp to the file name automatically
+        :param filesave:      False reads the screenshot data directly (HCOPy:DATA?);
+                              True saves a file on the instrument first and transfers
+                              it back to the PC (HCOPy:DESTination MMEM)
+        :param instr_dir:     name of the temporary folder created on the instrument
+                              when filesave=True
+        :param localfile:     True saves the file locally
+        :return: path of the generated image
         """
         if add_timestamp:
             filename = self._stamp(filename)
@@ -2570,47 +2668,53 @@ class MXO4(RsInstrument):
 #########################################################################################  
     def download_file(self, instr_path, pc_path,localfile=None):
         """
-        从示波器下载文件到 PC (``MMEMory:DATA?``)。
+        Download a file from the scope to the PC (``MMEMory:DATA?``).
 
-        对于大文件，PyVISA 的 ``query_binary_values`` 可能受超时和数据块解析影响；
-        这里先提高超时与 chunk size，若仍失败则回退到 ``write() + read_raw()``
-        并手动解析 SCPI 二进制块头 ``#N<length><data>`` 进行下载。
+        For large files the PyVISA ``query_binary_values`` may be affected by
+        timeouts and data block parsing; the timeout and the chunk size are
+        increased first, and if this still fails the code falls back to
+        ``write() + read_raw()`` and parses the SCPI binary block header
+        ``#N<length><data>`` manually.
 
-        :param instr_path: 示波器上的文件路径
-        :param pc_path:    PC 上的保存路径
-        :param localfile:  是否保留仪器上的临时文件
-        :return: PC 文件路径
+        :param instr_path: file path on the scope
+        :param pc_path:    save path on the PC
+        :param localfile:  whether the temporary file on the instrument is kept
+        :return: PC file path
         """
         # self._ensure_dir(pc_path)
         # drives = self.get_drives()
         # base = (drives[0] if drives else "/home/storage/userData").rstrip("/")
         # instr_file = f"{base}/{instr_dir}/screenshot.{fmt.lower()}"
         # instr_file = self._stamp(instr_file)
-        # self.opc_timeout = 600000  # 10 分钟5秒
+        # self.opc_timeout = 600000  # 10 minutes
         # self.wait_opc(self.opc_timeout)
         self._ensure_dir(pc_path)
-        print(f"文件是否存在: {self.file_exists(instr_path)}")
+        print(f"File exists: {self.file_exists(instr_path)}")
         # time.sleep(5)
         self.read_file_from_instrument_to_pc(instr_path, pc_path, False)
-        print(f"文件已下载到 PC: {pc_path}")
+        print(f"File downloaded to the PC: {pc_path}")
         return pc_path
 
     def save_waveform_csv_via_instrument(self, channel, pc_path=None, instr_path=None,
                                          scope="ALL", localfile=None):
         """
-        方式一 (组合): 先将波形导出为 CSV 保存到示波器, 再下载到 PC。
+        Method one (combined): export the waveform as a CSV on the scope first and
+        download it to the PC afterwards.
 
-        仪器端文件名与 PC 端文件名保持一致: 若 ``instr_path`` 为目录
-        (例如 'temp_files'), 仪器端路径为 '<instr_path>/<pc_path 文件名>'。
+        The file name on the instrument is kept identical to the PC file name: when
+        ``instr_path`` is a directory (e.g. 'temp_files'), the path on the instrument
+        becomes '<instr_path>/<pc_path file name>'.
 
-        :param channel:    通道号
-        :param pc_path:    PC 上的 CSV 保存路径
-        :param instr_path: 仪器上的保存目录或路径 (可含子目录, 例如 'temp_files')
-        :param scope:      导出范围: DISPlay / ALL / CURSor / GATE / MANual
-        :param localfile:  是否保留仪器上的临时文件 (False 时删除)
-        :return: (times, voltages) 时间与电压值列表
+        :param channel:    channel number
+        :param pc_path:    CSV save path on the PC
+        :param instr_path: save folder or path on the instrument (may include a
+                           sub folder, e.g. 'temp_files')
+        :param scope:      export range: DISPlay / ALL / CURSor / GATE / MANual
+        :param localfile:  whether the temporary file on the instrument is kept
+                           (deleted when False)
+        :return: (times, voltages) lists of time and voltage values
         """
-        # 仪器端文件名与 PC 端文件名保持一致
+        # keep the file name on the instrument identical to the PC file name
         base_name = os.path.basename(pc_path)
         if instr_path:
             instr_file = f"{instr_path.rstrip('/')}/{base_name}"
@@ -2622,15 +2726,15 @@ class MXO4(RsInstrument):
         instr_full = f"/home/storage/userData/{instr_file}"
         self.write(f"EXPort:WAVeform:NAME '{instr_full}'")
         self.write("EXPort:WAVeform:SAVE")
-        time.sleep(3)  # 等待仪器保存完成
-        print(f"波形 CSV 已保存到示波器: {instr_full}")
+        time.sleep(3)  # wait until the instrument has finished saving
+        print(f"Waveform CSV saved on the scope: {instr_full}")
         self.download_file(instr_full, pc_path, localfile=localfile)
-        # 1. 解析 pc_path 对应的 CSV 文件, 得到时间和电压值
+        # 1. parse the CSV file at pc_path to get the time and voltage values
         times = []
         voltages = []
         with open(pc_path, "r", newline="") as f:
             reader = csv.reader(f)
-            next(reader, None)  # 跳过表头 (例如 "Time(s),CH1(V)")
+            next(reader, None)  # skip the header (e.g. "Time(s),CH1(V)")
             for row in reader:
                 if not row or row[0].strip() == "":
                     continue
@@ -2642,15 +2746,15 @@ class MXO4(RsInstrument):
                 times.append(t)
                 voltages.append(v)
 
-        # 2. 若 localfile 为 False (或 None), 删除示波器上 instr_full 对应的文件
+        # 2. delete the file instr_full on the scope when localfile is False (or None)
         if not localfile:
             try:
                 self.write(f"MMEMory:DELete '{instr_full}'")
-                print(f"已删除示波器上的临时文件: {instr_full}")
+                print(f"Temporary file deleted from the scope: {instr_full}")
             except Exception as e:
-                print(f"警告: 删除示波器文件失败 (忽略): {e}")
+                print(f"Warning: deleting the scope file failed (ignored): {e}")
 
-        # 3. 返回时间和电压值
+        # 3. return the time and voltage values
         return times, voltages
 
        
@@ -2659,14 +2763,16 @@ class MXO4(RsInstrument):
 #########################################################################################
     def save_waveform_csv_direct(self, channel,filename,ascii_format=True):
         """
-        # 方式二: 直接从仪器读取波形数据, 在 PC 上保存 CSV (不在仪器上保存文件)。
+        # Method two: read the waveform data directly from the instrument and save
+        # the CSV on the PC (no file is stored on the instrument).
 
-        使用 ``CHANnel<n>:DATA:VALues?`` 读取 float32 二进制数据, 并用 numpy
-        接收 (内存约为 Python list 的 1/8), 分块写入 CSV, 适合 10Mpts 大记录长度。
+        ``CHANnel<n>:DATA:VALues?`` is used to read float32 binary data which is
+        received with numpy (about 1/8 of the memory of a Python list) and written
+        to the CSV in chunks, which suits large record lengths such as 10 Mpts.
 
-        :param channel:       通道号
-        :param filename:      PC 上的 CSV 保存路径
-        :return: (t, v), t 为时间轴 (s), v 为电压 (V), 均为 numpy 数组
+        :param channel:  channel number
+        :param filename: CSV save path on the PC
+        :return: (t, v), t is the time axis (s) and v the voltage (V), both numpy arrays
         """
         ch = self._ch(channel)
         hdr = self.get_waveform_header(channel)
@@ -2699,7 +2805,8 @@ class MXO4(RsInstrument):
             # old_timeout = self.instrument.timeout
             # old_chunk = getattr(self.instrument, "chunk_size", None)
             # try:
-            #     # 大记录长度传输耗时较长, 临时增大超时与读取块大小
+            #     # a large record length takes a long time to transfer, so the timeout
+            #     # and the read chunk size are increased temporarily
             #     self.instrument.timeout = max(int(old_timeout or 0), 500000)
             #     if old_chunk is not None:
             #         self.instrument.chunk_size = 100_000
@@ -2714,7 +2821,7 @@ class MXO4(RsInstrument):
         xstart = float(self._header_value(hdr, "Xstart", "Start") or 0.0)
         xstop = float(self._header_value(hdr, "Xstop", "Stop") or 0.0)
         n = len(volts)
-        # 生成完整时间轴 (既用于写文件, 也作为返回值)
+        # build the complete time axis (used for the file and as return value)
         if n > 1:
             t = np.linspace(xstart, xstop, n, dtype=np.float64)
         else:
@@ -2722,21 +2829,23 @@ class MXO4(RsInstrument):
 
         with open(filename, "w", newline="") as f:
             f.write(f"Time(s),CH{ch}(V)\n")
-            # 分块写入, 避免一次性拼接巨大字符串占用内存
+            # write in chunks to avoid building one huge string in memory
             chunk = 100_000
             for i in range(0, n, chunk):
                 end = i + chunk
                 lines = [f"{tt:.9e},{vv:.6f}" for tt, vv in zip(t[i:end], volts[i:end])]
                 f.write("\n".join(lines) + "\n")
-        print(f"波形已导出: {filename}  (共 {n} 点)")
+        print(f"Waveform exported: {filename}  ({n} points)")
         return t, volts
 
     def get_drives(self):
         """
-        查询仪器可用的存储路径 ``MMEMory:DRIVes?``, 返回路径列表。
+        Query the usable storage paths of the instrument ``MMEMory:DRIVes?``,
+        returns a list of paths.
 
-        MXO4 通常返回用户数据目录, 例如 ``['/home/storage/userData']``;
-        外接 U 盘等存储设备时可能返回多个路径。
+        The MXO4 normally returns the user data folder, e.g.
+        ``['/home/storage/userData']``; several paths may be returned when a USB
+        stick or another storage device is connected.
         """
         try:
             resp = self.query("MMEMory:DRIVes?")
@@ -2749,41 +2858,45 @@ class MXO4(RsInstrument):
 
     def save_screenshot_direct(self, pc_path):
         """
-        方式一: 直接获取截图数据 (``HCOPy:DATA?``), 无需在仪器上保存文件。
+        Method one: read the screenshot data directly (``HCOPy:DATA?``), no file has
+        to be saved on the instrument.
 
-        该命令直接返回 PNG 图片的二进制数据, 写入 ``pc_path``。
-        不涉及仪器文件系统, 因此不存在找不到仪器临时路径的问题。
+        The command returns the binary data of a PNG image which is written to
+        ``pc_path``. The instrument file system is not involved, so a missing
+        temporary path on the instrument cannot happen.
 
-        :param pc_path: PC 上的保存路径 (建议扩展名 .png)
-        :return: 生成的图片路径
+        :param pc_path: save path on the PC (a .png extension is recommended)
+        :return: path of the generated image
         """
         self._ensure_dir(pc_path)
         # data = self.instrument.query_binary_values("HCOPy:DATA?", datatype="B")
         data = self.query_bin_block_with_opc("HCOPy:DATA?",timeout =6000) 
         with open(pc_path, "wb") as f:
             f.write(bytes(data))
-        print(f"截屏已保存 (直接方式): {pc_path}")
+        print(f"Screenshot saved (direct method): {pc_path}")
         return pc_path
 
     def  save_screenshot_via_file(self, pc_path, fmt="PNG", instr_dir=None, localfile = False):
         """
-        方式二: 在仪器上创建临时文件夹保存截图, 再回传 PC。
+        Method two: create a temporary folder on the instrument, save the screenshot
+        there and transfer it back to the PC.
 
-        通过 ``MMEMory:DRIVes?`` 自动查询仪器的用户数据目录, 在其中创建
-        ``instr_dir`` 文件夹并保存截图, 用 ``MMEMory:DATA?`` 回传到 PC,
-        最后删除仪器上的临时文件。
+        ``MMEMory:DRIVes?`` is used to find the user data folder of the instrument
+        automatically; the folder ``instr_dir`` is created there, the screenshot is
+        saved in it and transferred to the PC with ``MMEMory:DATA?``, and finally
+        the temporary file on the instrument is deleted.
 
-        :param pc_path:   PC 上的保存路径
-        :param fmt:       图片格式 (PNG / JPG / BMP / GIF / TIFF)
-        :param instr_dir: 在仪器上创建的临时文件夹名称
-        :return: 生成的图片路径
+        :param pc_path:   save path on the PC
+        :param fmt:       image format (PNG / JPG / BMP / GIF / TIFF)
+        :param instr_dir: name of the temporary folder created on the instrument
+        :return: path of the generated image
         """
         self._ensure_dir(pc_path)
         drives = self.get_drives()
         base = (drives[0] if drives else "/home/storage/userData").rstrip("/")
         instr_file = f"{base}/{instr_dir}/screenshot.{fmt.lower()}"
         instr_file = self._stamp(instr_file)
-        # 创建临时文件夹 (已存在则忽略错误)
+        # create the temporary folder (errors are ignored when it already exists)
         # try:
         #     self.write(f"MMEMory:MDIRectory '{base}/{instr_dir}'")
         # except Exception:
@@ -2798,34 +2911,34 @@ class MXO4(RsInstrument):
         # self.query_bin_block_to_file(f"MMEMory:DATA? '{instr_file}'", pc_path)
         # with open(pc_path, "wb") as f:
         #     f.write(bytes(data))
-        # 清理仪器上的临时文件 (失败也不影响结果)
+        # clean up the temporary file on the instrument (a failure does not matter)
         self.write_str("HCOPy:DESTination1 MMEM")
         self.write_str("HCOPy:DEVice1:LANGuage PNG")
         self.write_str(f"MMEMory:NAME '{instr_file}'")
         self.write_str_with_opc("HCOPy:IMMediate1")
-        time.sleep(3)  # 等待仪器生成文件
+        time.sleep(3)  # wait until the instrument has created the file
         self.read_file_from_instrument_to_pc(instr_file, pc_path)
         print(f'Transferred screen shot to {pc_path}')
         try:
             if not localfile:
-                self.write(f"MMEMory:DELete '{instr_file}'") # 删除仪器上的临时文件
-                time.sleep(3)  # 等待删除完成
-                print(f"已删除示波器上的临时文件: {instr_file}")
+                self.write(f"MMEMory:DELete '{instr_file}'") # delete the temporary file on the instrument
+                time.sleep(3)  # wait until the deletion has finished
+                print(f"Temporary file deleted from the scope: {instr_file}")
         except Exception as e:
-            print(f"警告: 删除示波器文件失败 (忽略): {e}")
-        print(f"截屏已保存 (文件方式): {pc_path}")
+            print(f"Warning: deleting the scope file failed (ignored): {e}")
+        print(f"Screenshot saved (file method): {pc_path}")
         return pc_path
 #########################################################################################
 #########################################################################################
 #########################################################################################
     @staticmethod
     def _timestamp():
-        """返回时间戳字符串, 例如 20260821_153000_123 (精确到毫秒)。"""
+        """Return a timestamp string, e.g. 20260821_153000_123 (millisecond resolution)."""
         return time.strftime("%Y%m%d_%H%M%S") + f"_{int(time.time() * 1000) % 1000:03d}"
 
     @staticmethod
     def _stamp(path, ts=None):
-        """在文件名 (不含扩展名) 后追加时间戳, 返回新路径。"""
+        """Append a timestamp to the file name (without extension) and return the new path."""
         ts = ts or MXO4._timestamp()
         root, ext = os.path.splitext(path)
         return f"{root}_{ts}{ext}"
@@ -2838,18 +2951,18 @@ class MXO4(RsInstrument):
 
 
 # ==============================================================================
-# 示例
+# Example
 # ==============================================================================
 if __name__ == "__main__":
-    # 修改为你的示波器 IP / VISA 资源字符串
+    # change this to the IP / VISA resource string of your scope
     RESOURCE = "TCPIP::192.168.18.100::INSTR"
-    # 波形与 CSV 输出目录
+    # output folders for the waveforms and the CSV files
     PC_OUT_DIR = "waveforms"
     INSTR_FILE_OUT_DIR = "temp_files"
     INSTR_IMAGE_DIR = "temp_shots"
-    # 记录代码运行开始时间
+    # remember the start time of this script
     start_time = time.time()
-    print(f"程序开始时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Script start time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     mxo = MXO4(RESOURCE, timeout=10000)
 
     # mxo.download_file("/home/storage/userData/Waveforms/Waveform_2026-08-24_0_075310.csv", "edge_ch1_20260831_192344_996.csv")
@@ -2859,7 +2972,7 @@ if __name__ == "__main__":
             mxo.reset()
             mxo.set_display_update(True)
             mxo.opc_timeout = 60000 
-            # ---- 1. 通道与时基配置 ----
+            # ---- 1. channel and timebase configuration ----
             mxo.channel_state(1, True)
             mxo.channel_state(2, True)
 
@@ -2875,17 +2988,17 @@ if __name__ == "__main__":
             mxo.channel_scale(1, 1)
             mxo.channel_scale(2, 1)
             
-            mxo.sample_rate_mode(SampleRateMode.MANUAL)   #手动配置
-            # mxo.sample_rate_mode(SampleRateMode.AUTO)   #自动配置
-            print("当前采样率模式:", mxo.get_sample_rate_mode())
-            # 辅助函数示例：按时基自动估算并配置采样率与 1 Mpts
-            print("自动配置采样:", mxo.auto_sampling_for_timebase(2e-4, points="1M", wait=True))
+            mxo.sample_rate_mode(SampleRateMode.MANUAL)   # manual configuration
+            # mxo.sample_rate_mode(SampleRateMode.AUTO)   # automatic configuration
+            print("Current sample rate mode:", mxo.get_sample_rate_mode())
+            # helper example: estimate and configure the sample rate and 1 Mpts from the timebase
+            print("Automatic sampling setup:", mxo.auto_sampling_for_timebase(2e-4, points="1M", wait=True))
             mxo.set_display_brightness(brightness=100)
             # print(mxo.get_display_brightness())
-            mxo.set_signal_intensity(100)       # 波形亮度设为 100%
-            # print(mxo.get_signal_intensity())  # 读取当前波形亮度
+            mxo.set_signal_intensity(100)       # waveform intensity 100%
+            # print(mxo.get_signal_intensity())  # read the current waveform intensity
 
-            # ---- 2. 边沿触发: 保存波形 → 导出 CSV ----
+            # ---- 2. edge trigger: save waveform -> export CSV ----
             mxo.channel_label(1, "RX")
             mxo.channel_label(2, "TX")
               
@@ -2902,41 +3015,42 @@ if __name__ == "__main__":
             # mxo.save_waveform_csv(1, pc_path=os.path.join(PC_OUT_DIR, "edge_ch1.csv"),instr_path=INSTR_FILE_OUT_DIR, ascii_format=False, add_timestamp=True, filesave=False,localfile=False)  
 
             # ---- 3. UART 解码 + 串行 总线触发: 保存波形 → 导出 CSV ---
-            # 假设 UART RX 接通道1, TX 接通道2, 波特率 115200
+            # UART RX on channel 1, TX on channel 2, baud rate 115200
             mxo.configure_uart_decode(bus_number=1, rx="C1", tx="C2", baud=115200)  
             mxo.trigger_mode(TriggerMode.NORMAL)
             mxo.configure_uart_trigger(bus_number=1, source="SBUS1")
             mxo.single_and_wait(10000)
-            time.sleep(3)  # 等待仪器完成解码
+            time.sleep(3)  # wait until the instrument finished decoding
             mxo.save_waveform_image(os.path.join(PC_OUT_DIR, "uart.png"),fmt="png",add_timestamp=True,instr_dir= INSTR_IMAGE_DIR,filesave=False,localfile=True)
             mxo.save_waveform_csv(2, os.path.join(PC_OUT_DIR, "uart.csv"),instr_path=INSTR_FILE_OUT_DIR, ascii_format=False, add_timestamp=True, filesave=False,localfile=False)
             
 
-        #     # ---- 3b. UART 波形 ZOOM (仅示波器端) + 上升沿/幅值测量 + 光标 ----
-        #     # 1) 仪器端 ZOOM: 放大到一帧 UART 数据 (按协议参数估算, 无需回读波形)
+        #     # ---- 3b. UART waveform ZOOM (scope side only) + rise time/amplitude measurement + cursor ----
+        #     # 1) scope side ZOOM: magnify to one UART frame (estimated from the
+        #     #    protocol parameters, no waveform readback needed)
         #     uart_zoom = mxo.zoom_uart_display(baud=115200, data_bits=8,
         #                                     parity=UARTParity.NONE,
         #                                     stop_bits=STOPBit.ONE_BIT,
         #                                     margin_bits=2.0, reacquire=True)
         #     frame_time = uart_zoom["frame_time"]
 
-        #     # 2) 自动测量: CH1(RX) 上升沿时间 + 幅值 (+ 低/高电平用于放置水平光标)
+        #     # 2) automatic measurement: CH1(RX) rise time + amplitude (+ low/high level for the horizontal cursor)
         #     mxo.configure_rise_time_measurement(measure_index=4, source="C2", enable=True)
         #     mxo.configure_amplitude_measurement(measure_index=5, source="C2", enable=True)
         #     mxo.configure_measurement(measure_index=6, source="C2", main="LOW", enable=True)  
         #     mxo.configure_measurement(measure_index=7, source="C2", main="HIGH", enable=True)
-        #     mxo.wait_opc(5000)          # 等待测量刷新, 避免读到旧值
+        #     mxo.wait_opc(5000)          # wait for a measurement refresh to avoid reading old values
         #     rise_time = mxo.get_measurement_result(4)
         #     amplitude = mxo.get_measurement_result(5)
-        #     print(f"CH2 上升沿时间 (RTIMe):   {rise_time} s")
-        #     print(f"CH2 幅值 (AMPLitude):     {amplitude} V")
+        #     print(f"CH2 rise time (RTIMe):   {rise_time} s")
+        #     print(f"CH2 amplitude (AMPLitude):     {amplitude} V")
         #     try:
         #         low_level = float(mxo.get_measurement_result(6))
         #         high_level = float(mxo.get_measurement_result(7))
         #     except (ValueError, TypeError):
         #         low_level, high_level = 0.0, 5.0
 
-        #     # 3) 光标测量: 垂直 X1/X2 量一帧时间, 水平 Y1/Y2 量幅值 (显示可选)
+        #     # 3) cursor measurement: vertical X1/X2 for one frame time, horizontal Y1/Y2 for the amplitude (display optional)
         #     mxo.configure_cursor(cursor=1, function=CursorFunction.PAIRED, source="C2",
         #                         x1=0.0, x2=frame_time, y1=low_level, y2=high_level,
         #                         show=True, show_values=True, tracking=False)
@@ -2944,27 +3058,28 @@ if __name__ == "__main__":
         #     try:
         #         dx = mxo.get_cursor_delta_x(1)
         #         dy = mxo.get_cursor_delta_y(1)
-        #         print(f"光标 ΔX (一帧时间): {dx:.6e} s")
-        #         print(f"光标 ΔY (幅值):     {dy:.4f} V")
+        #         print(f"cursor delta X (one frame time): {dx:.6e} s")
+        #         print(f"cursor delta Y (amplitude):     {dy:.4f} V")
         #     except Exception as exc:
-        #         print(f"读取光标结果失败 (忽略): {exc}")
+        #         print(f"reading the cursor result failed (ignored): {exc}")
             
-        #     # 4) 截屏 (放大后的波形 + 测量 + 光标)
+        #     # 4) screenshot (magnified waveform + measurements + cursors)
         #     mxo.save_waveform_image(os.path.join(PC_OUT_DIR, "uart_zoom_meas_ch1.png"),
         #                             fmt="png", add_timestamp=True,
         #                             instr_dir=INSTR_IMAGE_DIR, filesave=False, localfile=True)
             
-        #     # 5) 隐藏 SBUS1 解码结果表, 露出自动测量结果表 (RMS/FREQuency/AMPLitude/RTIMe...), 再截一张图
-        #     mxo.bus_result_table(bus_number=1, on=False)   # 关闭 SBUS1 解码表
+        #     # 5) hide the SBUS1 decode result table so the automatic measurement result table
+        #     #    (RMS/FREQuency/AMPLitude/RTIMe...) becomes visible, then take another screenshot
+        #     mxo.bus_result_table(bus_number=1, on=False)   # switch the SBUS1 decode table off
         #     mxo.wait_opc(50000)
         #     time.sleep(3)
         #     mxo.save_waveform_image(os.path.join(PC_OUT_DIR, "uart_meas_result_ch1.png"),
         #                             fmt="png", add_timestamp=True,
         #                             instr_dir=INSTR_IMAGE_DIR, filesave=False, localfile=True)
-        #     mxo.bus_result_table(bus_number=1, on=True)    # 恢复解码表显示
+        #     mxo.bus_result_table(bus_number=1, on=True)    # restore the decode table display
 
-            # ---- 4. I2C 解码 + 串行总线触发: 保存波形 → 导出 CSV ----
-            # 假设 I2C SDA 接通道1, SCL 接通道2
+            # ---- 4. I2C decoding + serial bus trigger: save waveform -> export CSV ----
+            # I2C SDA on channel 1, SCL on channel 2
             # mxo.channel_label(1, "SDA")
             # mxo.channel_label(2, "SCL")
             # mxo.configure_i2c_decode(bus_number=2, scl="C2", sda="C1")
@@ -2974,13 +3089,14 @@ if __name__ == "__main__":
             # mxo.save_waveform_image(os.path.join(PC_OUT_DIR, "i2c.png"),fmt="png",add_timestamp=True,instr_dir=INSTR_IMAGE_DIR, filesave=False,localfile=True)
             # mxo.save_waveform_csv(1, os.path.join(PC_OUT_DIR, "i2c_ch1.csv"),instr_path=INSTR_FILE_OUT_DIR, ascii_format=False, add_timestamp=True, filesave=False,localfile=True)
 
-            # # ---- 4b. I2C 波形 ZOOM (仅示波器端) + 上升沿/幅值测量 + 光标 ----
-            # # 1) 仪器端 ZOOM: 放大到一帧 I2C 数据 (按协议参数估算, 无需回读波形)
+            # # ---- 4b. I2C waveform ZOOM (scope side only) + rise time/amplitude measurement + cursor ----
+            # # 1) scope side ZOOM: magnify to one I2C frame (estimated from the
+            # #    protocol parameters, no waveform readback needed)
             # i2c_zoom = mxo.zoom_i2c_display(scl_freq=150000, frame_bits=9,
             #                                 margin_bits=2.0, reacquire=True)
             # i2c_frame_time = i2c_zoom["frame_time"]
 
-            # # 2) 自动测量: CH1(SDA)/CH2(SCL) 上升沿时间 + 幅值 (+ 低/高电平用于放置水平光标)
+            # # 2) automatic measurement: CH1(SDA)/CH2(SCL) rise time + amplitude (+ low/high level for the cursor)
             # mxo.configure_rise_time_measurement(measure_index=4, source="C1", enable=True)
             # mxo.configure_amplitude_measurement(measure_index=5, source="C1", enable=True)
             # mxo.configure_measurement(measure_index=6, source="C1", main="LOW", enable=True)
@@ -2989,20 +3105,20 @@ if __name__ == "__main__":
             # mxo.configure_amplitude_measurement(measure_index=9, source="C2", enable=True)
             # mxo.configure_measurement(measure_index=10, source="C2", main="LOW", enable=True)
             # mxo.configure_measurement(measure_index=11, source="C2", main="HIGH", enable=True)
-            # mxo.wait_opc(5000)          # 等待测量刷新, 避免读到旧值
+            # mxo.wait_opc(5000)          # wait for a measurement refresh to avoid reading old values
             # rise_c1 = mxo.get_measurement_result(4)
             # amp_c1 = mxo.get_measurement_result(5)
             # rise_c2 = mxo.get_measurement_result(8)
             # amp_c2 = mxo.get_measurement_result(9)
-            # print(f"CH1(SDA) 上升沿时间 (RTIMe): {rise_c1} s,  幅值 (AMPLitude): {amp_c1} V")
-            # print(f"CH2(SCL) 上升沿时间 (RTIMe): {rise_c2} s,  幅值 (AMPLitude): {amp_c2} V")
+            # print(f"CH1(SDA) rise time (RTIMe): {rise_c1} s,  amplitude (AMPLitude): {amp_c1} V")
+            # print(f"CH2(SCL) rise time (RTIMe): {rise_c2} s,  amplitude (AMPLitude): {amp_c2} V")
             # try:
             #     low_c1 = float(mxo.get_measurement_result(6))
             #     high_c1 = float(mxo.get_measurement_result(7))
             # except (ValueError, TypeError):
             #     low_c1, high_c1 = 0.0, 5.0
 
-            # # 3) 光标测量: 垂直 X1/X2 量一帧时间, 水平 Y1/Y2 量幅值 (显示可选)
+            # # 3) cursor measurement: vertical X1/X2 for one frame time, horizontal Y1/Y2 for the amplitude (display optional)
             # mxo.configure_cursor(cursor=1, function=CursorFunction.PAIRED, source="C2",
             #                      x1=0.0, x2=i2c_frame_time, y1=low_c1, y2=high_c1,
             #                      show=True, show_values=True, tracking=False)
@@ -3010,39 +3126,40 @@ if __name__ == "__main__":
             # try:
             #     dx = mxo.get_cursor_delta_x(1)
             #     dy = mxo.get_cursor_delta_y(1)
-            #     print(f"光标 ΔX (一帧时间): {dx:.6e} s")
-            #     print(f"光标 ΔY (幅值):     {dy:.4f} V")
+            #     print(f"cursor delta X (one frame time): {dx:.6e} s")
+            #     print(f"cursor delta Y (amplitude):     {dy:.4f} V")
             # except Exception as exc:
-            #     print(f"读取光标结果失败 (忽略): {exc}")
+            #     print(f"reading the cursor result failed (ignored): {exc}")
 
-            # # 4) 截屏 (放大后的波形 + 测量 + 光标)
+            # # 4) screenshot (magnified waveform + measurements + cursors)
             # mxo.save_waveform_image(os.path.join(PC_OUT_DIR, "i2c_zoom_meas.png"),
             #                         fmt="png", add_timestamp=True,
             #                         instr_dir=INSTR_IMAGE_DIR, filesave=False, localfile=True)
 
-            # # 5) 隐藏 SBUS2 解码结果表, 露出自动测量结果表 (RMS/FREQuency/AMPLitude/RTIMe...), 再截一张图
-            # mxo.bus_result_table(bus_number=2, on=False)   # 关闭 SBUS2 解码表
+            # # 5) hide the SBUS2 decode result table so the automatic measurement result table
+            # #    (RMS/FREQuency/AMPLitude/RTIMe...) becomes visible, then take another screenshot
+            # mxo.bus_result_table(bus_number=2, on=False)   # switch the SBUS2 decode table off
             # mxo.wait_opc(50000)
             # time.sleep(3)
             # mxo.save_waveform_image(os.path.join(PC_OUT_DIR, "i2c_meas_result.png"),
             #                         fmt="png", add_timestamp=True,
             #                         instr_dir=INSTR_IMAGE_DIR, filesave=False, localfile=True)
-            # mxo.bus_result_table(bus_number=2, on=True)    # 恢复解码表显示
+            # mxo.bus_result_table(bus_number=2, on=True)    # restore the decode table display
           
             
         
-            # ---- 5. SPI 解码 + 串行总线触发: 保存波形 → 导出 CSV ----
-            # 假设 SCLK=C1, MOSI=C2, MISO=C3, SS=C4
+            # ---- 5. SPI decoding + serial bus trigger: save waveform -> export CSV ----
+            # SCLK=C1, MOSI=C2, MISO=C3, SS=C4
             # mxo.configure_spi_decode(bus_number=3, sclk="C1", mosi="C2", miso="C3", ss="C4")
             # mxo.trigger_mode(TriggerMode.NORMAL)
             # mxo.configure_spi_trigger(bus_number=3, condition="MOSI")
             # mxo.single_and_wait(10000)
             # mxo.save_waveform_image(os.path.join(PC_OUT_DIR, "spi_ch1.png"),fmt="png",add_timestamp=True,instr_dir=INSTR_IMAGE_DIR, filesave=False,localfile=True)
             # mxo.save_waveform_csv(1, os.path.join(PC_OUT_DIR, "spi_ch1.csv"),instr_path=INSTR_FILE_OUT_DIR, ascii_format=False, add_timestamp=True, filesave=True)
-            # print(f"SPI 解码结果:\n{mxo.get_decoded_data(3)}")
+            # print(f"SPI decode result:\n{mxo.get_decoded_data(3)}")
 
-            # ---- 6. QSPI 解码: 保存波形 → 导出 CSV ----
-            # 假设 SCLK=C1, CS=C2, IO0=C3, IO1=C4, IO2=C5, IO3=C6
+            # ---- 6. QSPI decoding: save waveform -> export CSV ----
+            # SCLK=C1, CS=C2, IO0=C3, IO1=C4, IO2=C5, IO3=C6
 
             mxo.configure_logic_decode(pbus=1, bits=[(0,"SCLK"), (1,"CS"), (2,"IO0"), (3,"IO1"), (4,"IO2"), (5,"IO3")], 
                            threshold=1.65, technology="V165")
@@ -3055,19 +3172,19 @@ if __name__ == "__main__":
                           "dtlanes": "QUAD", "dmcycles": 8, "ddr": False,
                           "data": True}])
             mxo.configure_qspi_trigger(bus_number=4, source="SBUS4",
-                           clock_source="D0",    # 触发时钟: 模拟 C1 或数字 D0
+                           clock_source="D0",    # trigger clock: analog C1 or digital D0
                            frame_enable=True, invert=False)
             mxo.single_and_wait(10000)
             mxo.save_waveform_image(os.path.join(PC_OUT_DIR, "qspi.png"),fmt="png",add_timestamp=True,instr_dir=INSTR_IMAGE_DIR, filesave=False,localfile=True)
             mxo.save_waveform_csv(1, os.path.join(PC_OUT_DIR, "qspi_ch1.csv"),instr_path=INSTR_FILE_OUT_DIR, ascii_format=False, add_timestamp=True, filesave=True,localfile=False)
-            print(f"QSPI 解码结果:\n{mxo.get_decoded_data(4)}")
+            print(f"QSPI decode result:\n{mxo.get_decoded_data(4)}")
 
-            # # ---- 6. 截屏保存 ----
+            # # ---- 6. screenshot saving ----
             # mxo.save_waveform_image(os.path.join(PC_OUT_DIR, "screen.png"),fmt="png",add_timestamp=True,instr_dir=INSTR_IMAGE_DIR, filesave=False,localfile=True)
     finally:
         mxo.close()
 
-    # 记录代码运行结束时间, 并计算打印耗时  
+    # remember the end time of this script and print the elapsed time  
     end_time = time.time()
-    print(f"程序结束时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"运行耗时: {end_time - start_time:.3f} 秒")
+    print(f"Script end time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Elapsed time: {end_time - start_time:.3f} s")

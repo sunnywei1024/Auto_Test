@@ -16,9 +16,11 @@ if _project_root not in sys.path:
 from xlutils.copy import copy
 from Layer1 import GK_I2C
 from Layer1 import pyQueen
+from Layer1.KEYSIGHT34461A import *
 from Layer1.MXO4 import *
 from Layer1.SerialPort import *
 from Layer2.TestInput import *
+
 
 class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
     def __init__(self):
@@ -43,7 +45,10 @@ class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
                     names[i['设备名称']] = SerialPort(port=i['设备地址'])  
             elif i['设备类型']=='Multimeter':
                 if i['设备型号'] =='34461A':
-                    names[i['设备名称']] = SerialPort(port=i['设备地址'])  
+                    if 'I' in i['设备名称']:
+                        names[i['设备名称']] = KEYSIGHT34461A(i['设备地址'],'I')
+                    else:
+                        names[i['设备名称']] = KEYSIGHT34461A(i['设备地址'],'V')
   
 
     def instrs_close(self, *instrs):

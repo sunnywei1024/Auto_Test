@@ -110,8 +110,11 @@ def UR_Test(myapi, temp, item_dir, **Parameters):
                             fmt="png", add_timestamp=True,
                             instr_dir=INSTR_IMAGE_DIR, filesave=False, localfile=True)
     myapi.OSC.bus_result_table(bus_number=1, on=True)    # 恢复解码表显示
-
     print("Usart test is done..................................\n")
+    
+    for i in range(0,100):
+        myapi.VDMM.DCV()
+        time.sleep(1)
     end_time = time.time()
     print(f"程序结束时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"运行耗时: {end_time - start_time:.3f} 秒")

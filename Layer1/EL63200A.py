@@ -656,7 +656,7 @@ if __name__ == "__main__":
 
     # --- CR constant resistance: 10 ohm ---
     ELOAD.CR_MODE(10.0)
-
+ 
     # --- CP constant power: 100W ---
     ELOAD.CP_MODE(100.0)
 

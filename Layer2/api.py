@@ -21,7 +21,9 @@ from Layer1.KEYSIGHT34461A import *
 from Layer1.MXO4 import *
 from Layer1.SerialPort import *
 from Layer1.PS9080 import *
+from Layer1.KEYSIGHT53230A import *
 from Layer1.EL63200A import *
+from Layer1.KEYSIGHT973A import *
 from Layer2.TestInput import *
 
 class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
@@ -54,9 +56,15 @@ class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
             elif i['设备类型']=='ELoad':
                 if i['设备型号'] =='63200A':
                     names[i['设备名称']] = EL63200A(i['设备地址'])
+            elif i['设备类型']=='Counter':
+                if i['设备型号'] =='53230A':
+                    names[i['设备名称']] = FREQ53230A(i['设备地址'])
             elif i['设备类型']=='PSU':
                 if i['设备型号'] =='PS9080':
                     names[i['设备名称']] = PS9080(i['设备地址'])
+            elif i['设备类型']=='DAQ':
+                if i['设备型号'] =='DAQ973A':
+                    names[i['设备名称']] = DAQ973A(i['设备地址'])
   
 
     def instrs_close(self, *instrs):
@@ -74,11 +82,17 @@ class api(GK_I2C.GK_I2C, pyQueen.PyQueen):
             elif i['设备类型']=='Multimeter':
                 if i['设备型号'] =='34461A':
                     names[i['设备名称']].close()
+            elif i['设备类型']=='Counter':
+                if i['设备型号'] =='53230A':
+                    names[i['设备名称']].close()
             elif i['设备类型']=='ELoad':
                 if i['设备型号'] =='63200A':
                     names[i['设备名称']].close()
             elif i['设备类型']=='PSU':
                 if i['设备型号'] =='PS9080':
+                    names[i['设备名称']].close()
+            elif i['设备类型']=='DAQ':
+                if i['设备型号'] =='DAQ973A':
                     names[i['设备名称']].close()
             
 if __name__ == "__main__":

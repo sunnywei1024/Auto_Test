@@ -41,6 +41,7 @@ def AutoTest():
             # print(TestItems[j]['测试函数'])
             item_name = str(TestItems[j]['测试函数']).strip()
             item_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),"Report",TestIC,item_name)
+            print(item_dir)
             if not os.path.exists(item_dir):
                 os.makedirs(item_dir)
             # Execute test function

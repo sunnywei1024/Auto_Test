@@ -91,10 +91,6 @@ def I2C_Test(myapi, temp, item_dir, **Parameters):
                          show=True, show_values=True, tracking=True)
     myapi.OSC.wait_opc(5000)
     # 18.12.1 Zoom how to Adjust the Disply Zone
-    
-
-
-
     try:
         dx = myapi.OSC.get_cursor_delta_x(1)
         dy = myapi.OSC.get_cursor_delta_y(1)
